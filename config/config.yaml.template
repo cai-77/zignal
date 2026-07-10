@@ -1,0 +1,114 @@
+# ============================================================
+# Trading System Configuration — TEMPLATE
+# Copy this file to config.yaml and fill in your keys.
+# NEVER commit config.yaml — it is in .gitignore.
+# ============================================================
+
+active_broker: alpaca
+active_strategy: volume_rsi_swing
+
+# ============================================================
+# Broker Configurations
+# ============================================================
+
+alpaca:
+  api_key: "YOUR_ALPACA_API_KEY"
+  secret_key: "YOUR_ALPACA_SECRET_KEY"
+  base_url: "https://paper-api.alpaca.markets"   # change to live URL when ready
+
+ibkr:
+  host: "127.0.0.1"
+  port: 7497
+  client_id: 1
+
+# ============================================================
+# Data Feed Configurations
+# ============================================================
+
+polygon:
+  api_key: "YOUR_POLYGON_API_KEY"
+
+finnhub:
+  api_key: "YOUR_FINNHUB_API_KEY"
+
+# ============================================================
+# Watchlist
+# ============================================================
+
+watchlist:
+  - AAPL
+  - MSFT
+  - NVDA
+  - AMZN
+  - META
+
+# ============================================================
+# Earnings Swing Strategy Parameters
+# ============================================================
+
+swing:
+  entry_weeks_before_earnings: 4
+  exit_days_before_earnings: 3
+  rsi_min: 40
+  rsi_max: 60
+  sma_period: 50
+
+# ============================================================
+# Volume-RSI Swing Strategy Parameters
+# ============================================================
+
+volume_rsi_swing:
+  rsi_period: 14
+  rsi_oversold: 40
+  rsi_overbought: 65
+  rsi_lookback_bars: 10
+  sma_period: 50
+  sma_slope_period: 5
+  volume_lookback: 20
+  volume_avg_period: 20
+  volume_dry_up_ratio: 0.80
+  distribution_lookback: 10
+  distribution_vol_ratio: 1.5
+  distribution_price_drop_pct: 0.01
+  max_distribution_days: 1
+
+# ============================================================
+# Day Trading Strategy Parameters
+# ============================================================
+
+day_trading:
+  bar_timeframe_minutes: 5
+  rsi_period: 14
+  rsi_oversold: 30
+  rsi_overbought: 70
+  fast_ema_period: 9
+  slow_ema_period: 21
+  close_minutes_before_eod: 15
+
+# ============================================================
+# Risk Management
+# ============================================================
+
+risk:
+  max_position_pct: 0.05
+  max_portfolio_heat: 0.20
+  stop_loss_pct: 0.02
+  max_daily_loss_pct: 0.03
+
+# ============================================================
+# LLM Analysis
+# ============================================================
+
+llm:
+  api_key: ""   # or set ANTHROPIC_API_KEY environment variable
+  model: "claude-opus-4-8"
+
+# ============================================================
+# Backtesting
+# ============================================================
+
+backtest:
+  start_date: "2024-07-01"
+  end_date: "2024-12-31"
+  initial_capital: 100000.0
+  commission_per_trade: 0.0

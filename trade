@@ -1,0 +1,58 @@
+#!/usr/bin/env zsh
+# Usage:
+#   ./trade backtest [strategy] [start] [end]
+#   ./trade paper [strategy]
+#   ./trade live [strategy]
+#   ./trade setup
+
+SCRIPT_DIR="${0:A:h}"
+PYTHON="$SCRIPT_DIR/.venv/bin/python"
+
+if [[ ! -x "$PYTHON" ]]; then
+  echo "Error: venv not found. Run: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
+  exit 1
+fi
+
+MODE="${1:-setup}"
+shift 2>/dev/null
+
+ARGS=()
+
+case "$MODE" in
+  backtest)
+    ARGS+=(--mode backtest)
+    [[ -n "${1:-}" ]] && ARGS+=(--strategy "$1")
+    [[ -n "${2:-}" ]] && ARGS+=(--start "$2")
+    [[ -n "${3:-}" ]] && ARGS+=(--end "$3")
+    ;;
+  paper)
+    ARGS+=(--mode paper)
+    [[ -n "${1:-}" ]] && ARGS+=(--strategy "$1")
+    ;;
+  live)
+    ARGS+=(--mode live)
+    [[ -n "${1:-}" ]] && ARGS+=(--strategy "$1")
+    ;;
+  setup)
+    ARGS+=(--mode setup)
+    ;;
+  dashboard)
+    ARGS+=(--mode dashboard)
+    ;;
+  *)
+    echo "Usage: ./trade [backtest|paper|live|setup|dashboard] [strategy] [start] [end]"
+    echo ""
+    echo "Examples:"
+    echo "  ./trade setup"
+    echo "  ./trade backtest"
+    echo "  ./trade backtest rsi_mean_reversion 2025-01-01 2025-06-01"
+    echo "  ./trade backtest earnings_swing"
+    echo "  ./trade paper"
+    echo "  ./trade paper moving_average_crossover"
+    echo "  ./trade dashboard"
+    exit 1
+    ;;
+esac
+
+cd "$SCRIPT_DIR"
+exec "$PYTHON" main.py "${ARGS[@]}"

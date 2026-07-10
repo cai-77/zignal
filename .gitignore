@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+venv/
+.venv/
+
+# Secrets / config with keys
+config/config.yaml
+
+# Database
+db/
+
+# Logs and data
+logs/
+data/
+
+# macOS
+.DS_Store

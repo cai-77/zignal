@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/bin/python3 *)",
+      "Bash(.venv/bin/streamlit run *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8501)",
+      "Bash(pkill -f \"streamlit run\")",
+      "Skill(claude-api)",
+      "Bash(.venv/bin/pip install *)",
+      "Bash(.venv/bin/python *)",
+      "Bash(xargs ls -la)",
+      "Bash(xargs -I{} find {} -name \"*.pyc\")",
+      "Bash(.venv/bin/python -m py_compile dashboard/app.py)",
+      "Bash(python3 -m pip install \"fpdf2>=2.7.0\" \"kaleido>=0.2.1\" -q)",
+      "Bash(python3 -c \"import fpdf; print\\(fpdf.__version__\\)\")",
+      "Bash(python3 -c \"import kaleido; print\\('kaleido ok'\\)\")",
+      "Bash(python3 *)"
+    ]
+  }
+}

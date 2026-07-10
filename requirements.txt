@@ -1,0 +1,39 @@
+# ── Broker SDKs ──────────────────────────────────────────────────────
+alpaca-py>=0.20.0            # Alpaca trading + real-time WebSocket data
+ib_insync>=0.9.86            # Interactive Brokers (requires TWS/IB Gateway running)
+
+# ── Market Data ───────────────────────────────────────────────────────
+polygon-api-client>=1.14.0   # Historical OHLCV from Polygon.io
+
+# ── Fundamental / Earnings Data ───────────────────────────────────────
+finnhub-python>=2.4.19       # Earnings calendar, analyst estimates
+
+# ── Data / Numerics ───────────────────────────────────────────────────
+pandas>=2.0.0
+numpy>=1.24.0
+
+# ── Config ────────────────────────────────────────────────────────────
+PyYAML>=6.0.1
+
+# ── Timezone support ──────────────────────────────────────────────────
+pytz>=2024.1
+python-dateutil>=2.8.2
+
+# ── Async / Networking ────────────────────────────────────────────────
+aiohttp>=3.9.0               # used internally by alpaca-py WebSocket client
+websockets>=12.0
+
+# ── Display / Utilities ───────────────────────────────────────────────
+tabulate>=0.9.0              # pretty-print tables in backtest summaries
+
+# ── LLM Analysis ──────────────────────────────────────────────────────
+anthropic>=0.50.0            # Anthropic Python SDK (claude-opus-4-8 analysis)
+
+# ── Dashboard ─────────────────────────────────────────────────────────
+streamlit>=1.35.0
+streamlit-autorefresh>=1.0.1
+plotly>=5.20.0
+
+# ── Report export ──────────────────────────────────
+fpdf2>=2.7.0                 # PDF generation (pure Python, no system deps)
+kaleido>=0.2.1               # Plotly static PNG for embedding in PDF
