@@ -1,4 +1,4 @@
-# Trading System — Technical Guide
+# Zignal — Technical Guide
 
 This document covers architecture, data sources, component design, configuration, and setup.
 For day-to-day usage of the Analyze tool, see [USAGE_GUIDE.md](USAGE_GUIDE.md).
@@ -42,9 +42,9 @@ The Analyze mode (dashboard) is the primary interactive tool. Trading execution 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Streamlit Dashboard                         │
-│  ┌──────────┐ ┌──────────┐ ┌────────┐ ┌─────────┐ ┌─────────┐ │
-│  │  Live    │ │Backtests │ │ Trades │ │ Control │ │ Analyze │ │
-│  └──────────┘ └──────────┘ └────────┘ └─────────┘ └────┬────┘ │
+│  ┌──────┐ ┌─────────┐ ┌──────────────┐ ┌──────────┐ ┌────────┐ ┌──────────┐ │
+│  │ Live │ │ Analyze │ │ Signal Audit │ │Backtests │ │ Trades │ │ Settings │ │
+│  └──────┘ └────┬────┘ └──────────────┘ └──────────┘ └────────┘ └──────────┘ │
 └──────────────────────────────────────────────────────────┼──────┘
                                                            │
                             ┌──────────────────────────────┤
@@ -486,10 +486,11 @@ The dashboard runs on `localhost:8501` by default. Streamlit hot-reloads on file
 | Page | Description |
 |------|-------------|
 | **Live** | Real-time portfolio value, event feed, recent trades (auto-refreshes every 30s) |
+| **Analyze** | On-demand entry/exit analysis for any ticker with hybrid rule + AI verdict |
+| **Signal Audit** | Batch back-test the rule engine across a date range; measures historical prediction accuracy |
 | **Backtests** | History of all backtest runs with equity curves and trade logs |
 | **Trades** | Full trade history across paper and live sessions |
-| **Control** | Edit strategy parameters and risk settings from the UI; launch paper/live/backtest runs |
-| **Analyze** | On-demand entry analysis for any ticker with hybrid rule + AI verdict |
+| **Settings** | Edit strategy parameters and risk settings from the UI; launch paper/live/backtest runs |
 
 ---
 

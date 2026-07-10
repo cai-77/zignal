@@ -1,4 +1,4 @@
-# Trading System — Usage Guide
+# Zignal — Usage Guide
 
 This document covers how to use the system day-to-day: running an analysis, reading verdicts, interpreting the AI layer, tuning parameters, and understanding what the tool can and cannot tell you.
 
@@ -344,7 +344,7 @@ Increase `rsi_lookback_bars` from 10 to 14 or 20. This tells the rule engine to 
 
 ### "RSI says FAIL but I see the stock dipped to 35 five days ago"
 
-Your `rsi_lookback_bars` is too small. Go to the Control page or edit `config.yaml` and set `rsi_lookback_bars: 14` (or higher). Re-analyze. The condition detail will then show the earlier dip.
+Your `rsi_lookback_bars` is too small. Go to the Settings page or edit `config.yaml` and set `rsi_lookback_bars: 14` (or higher). Re-analyze. The condition detail will then show the earlier dip.
 
 ### "SMA says FAIL — freefall — but the last 3 candles are green"
 
