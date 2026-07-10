@@ -16,5 +16,8 @@ db/
 logs/
 data/
 
+# IDE / Claude Code
+.claude/
+
 # macOS
 .DS_Store
