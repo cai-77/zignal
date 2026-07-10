@@ -5,7 +5,7 @@ Pages:
   Live      — real-time positions, account stats, event feed (auto-refresh 30s)
   Backtests — history of all backtest runs with equity curves and trade logs
   Trades    — full trade history across paper/live sessions
-  Control   — edit config knobs and launch paper/live/backtest runs
+  Settings  — edit config knobs and launch paper/live/backtest runs
 """
 
 import json
@@ -35,6 +35,62 @@ st.set_page_config(
 )
 
 db = DatabaseManager(DB_PATH)
+
+# ── Global CSS ─────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+/* Remove default top padding so content starts at the top */
+.block-container { padding-top: 1.2rem !important; }
+
+/* Tighten sidebar top padding */
+section[data-testid="stSidebar"] > div:first-child { padding-top: 0.75rem !important; }
+
+/* Hide the default radio widget entirely — we use our own nav */
+div[data-testid="stSidebarNav"] { display: none; }
+
+/* Custom nav button style */
+.zg-nav-btn {
+    display: block;
+    width: 100%;
+    padding: 0.55rem 1rem;
+    margin: 2px 0;
+    border-radius: 8px;
+    border: none;
+    background: transparent;
+    color: #94A3B8;
+    font-size: 0.9rem;
+    font-weight: 500;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    text-decoration: none;
+}
+.zg-nav-btn:hover { background: rgba(124,58,237,0.12); color: #E2E8F0; }
+.zg-nav-btn.active { background: rgba(124,58,237,0.25); color: #C4B5FD; font-weight: 600; }
+.zg-nav-icon { margin-right: 0.6rem; font-size: 1rem; }
+
+/* Re-style Streamlit sidebar buttons to look like nav links */
+section[data-testid="stSidebar"] .stButton > button {
+    background: transparent !important;
+    border: none !important;
+    border-radius: 8px !important;
+    color: #94A3B8 !important;
+    font-size: 0.9rem !important;
+    font-weight: 500 !important;
+    text-align: left !important;
+    padding: 0.5rem 1rem !important;
+    box-shadow: none !important;
+    transition: background 0.15s, color 0.15s !important;
+}
+section[data-testid="stSidebar"] .stButton > button:hover {
+    background: rgba(124,58,237,0.12) !important;
+    color: #E2E8F0 !important;
+}
+
+/* Page titles — tighter top margin */
+h1 { margin-top: 0 !important; padding-top: 0 !important; }
+</style>
+""", unsafe_allow_html=True)
 
 
 # ======================================================================
@@ -109,9 +165,36 @@ if _logo_path.exists():
     st.sidebar.image(str(_logo_path), use_container_width=True)
 else:
     st.sidebar.markdown("## ⚡ Zignal")
-page = st.sidebar.radio("Navigate", ["Live", "Backtests", "Trades", "Control", "Analyze", "Signal Audit"])
-st.sidebar.markdown("---")
-st.sidebar.caption("Auto-refreshes every 30s on Live page.")
+
+# Custom sidebar navigation
+_NAV_ITEMS = [
+    ("Live",         "🟢"),
+    ("Analyze",      "🔍"),
+    ("Signal Audit", "📊"),
+    ("Backtests",    "📈"),
+    ("Trades",       "📋"),
+    ("Settings",     "⚙️"),
+]
+
+if "page" not in st.session_state:
+    st.session_state["page"] = "Analyze"
+
+st.sidebar.markdown("<div style='margin-top:0.5rem'></div>", unsafe_allow_html=True)
+for _label, _icon in _NAV_ITEMS:
+    _active = "active" if st.session_state["page"] == _label else ""
+    if st.sidebar.button(
+        f"{_icon}  {_label}",
+        key=f"nav_{_label}",
+        use_container_width=True,
+        type="secondary",
+    ):
+        st.session_state["page"] = _label
+        st.rerun()
+
+page = st.session_state["page"]
+
+st.sidebar.markdown("<div style='margin-top:auto; padding-top:1rem'></div>", unsafe_allow_html=True)
+st.sidebar.caption("⚡ Auto-refreshes every 30s on Live")
 
 
 # ======================================================================
@@ -323,12 +406,12 @@ elif page == "Trades":
 # CONTROL PAGE
 # ======================================================================
 
-elif page == "Control":
+elif page == "Settings":
     proc = _running_proc()
     if proc is not None:
         st_autorefresh(interval=5_000, key="ctrl_refresh")
 
-    st.title("Control Center")
+    st.title("Settings")
 
     cfg = load_cfg()
 
