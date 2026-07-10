@@ -1,5 +1,5 @@
 """
-Trading System Dashboard — Streamlit UI
+Zignal — AI-powered trading signal dashboard
 
 Pages:
   Live      — real-time positions, account stats, event feed (auto-refresh 30s)
@@ -28,8 +28,8 @@ from db.database import DatabaseManager
 DB_PATH = str(ROOT / "db" / "trading.db")
 
 st.set_page_config(
-    page_title="Trading Dashboard",
-    page_icon="📈",
+    page_title="Zignal",
+    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -104,7 +104,11 @@ def _running_proc() -> "subprocess.Popen | None":
     return proc
 
 
-st.sidebar.title("Trading System")
+_logo_path = ROOT / "assets" / "zignal_logo.svg"
+if _logo_path.exists():
+    st.sidebar.image(str(_logo_path), use_container_width=True)
+else:
+    st.sidebar.markdown("## ⚡ Zignal")
 page = st.sidebar.radio("Navigate", ["Live", "Backtests", "Trades", "Control", "Analyze", "Signal Audit"])
 st.sidebar.markdown("---")
 st.sidebar.caption("Auto-refreshes every 30s on Live page.")

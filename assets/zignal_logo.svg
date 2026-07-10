@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 80" width="320" height="80">
+  <defs>
+    <linearGradient id="zGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#7C3AED"/>
+      <stop offset="100%" style="stop-color:#06B6D4"/>
+    </linearGradient>
+    <linearGradient id="signalGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#06B6D4"/>
+      <stop offset="100%" style="stop-color:#7C3AED"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Z lettermark with signal wave embedded -->
+  <!-- Z top bar -->
+  <line x1="8" y1="14" x2="52" y2="14" stroke="url(#zGrad)" stroke-width="5" stroke-linecap="round"/>
+  <!-- Z diagonal -->
+  <line x1="52" y1="14" x2="8" y2="66" stroke="url(#zGrad)" stroke-width="5" stroke-linecap="round"/>
+  <!-- Z bottom bar -->
+  <line x1="8" y1="66" x2="52" y2="66" stroke="url(#zGrad)" stroke-width="5" stroke-linecap="round"/>
+
+  <!-- Signal pulse line running through the Z diagonal space -->
+  <polyline
+    points="60,40 74,40 80,22 88,58 96,30 104,50 112,40 126,40"
+    fill="none"
+    stroke="url(#signalGrad)"
+    stroke-width="3"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <!-- Pulse dot at peak -->
+  <circle cx="96" cy="30" r="3.5" fill="#06B6D4"/>
+
+  <!-- Wordmark -->
+  <text
+    x="138"
+    y="52"
+    font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif"
+    font-size="36"
+    font-weight="700"
+    letter-spacing="-1"
+    fill="url(#zGrad)"
+  >zignal</text>
+
+  <!-- Tagline -->
+  <text
+    x="139"
+    y="68"
+    font-family="'SF Pro Text', 'Helvetica Neue', Arial, sans-serif"
+    font-size="10"
+    font-weight="400"
+    letter-spacing="3"
+    fill="#94A3B8"
+  >AI · SIGNAL · TRADE</text>
+</svg>
