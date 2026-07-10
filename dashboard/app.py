@@ -12,6 +12,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+import streamlit.components.v1 as _components
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -39,61 +40,118 @@ db = DatabaseManager(DB_PATH)
 # ── Global CSS ─────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* ── Hide only the noisy parts of Streamlit header, not the header itself ──
-   The sidebar toggle button lives inside the header — if we hide the header
-   the toggle disappears. So we keep the header but strip its contents.     */
-header[data-testid="stHeader"] {
-    background-color: #0e1117 !important;
-    border-bottom: none !important;
-}
+/* ── Hide all Streamlit chrome ── */
+header[data-testid="stHeader"]   { display: none !important; }
 [data-testid="stToolbar"]        { display: none !important; }
 [data-testid="stDecoration"]     { display: none !important; }
 #MainMenu                        { display: none !important; }
 footer                           { display: none !important; }
 
-/* ── Main content — header still occupies its natural ~3rem ── */
+/* ── Hide the sidebar collapse button inside the sidebar (pushes logo down) ── */
+/* Keep collapsedControl in DOM so JS can click it to re-expand              */
+[data-testid="stSidebarCollapseButton"]                        { display: none !important; }
+section[data-testid="stSidebar"] button[kind="header"]         { display: none !important; }
+section[data-testid="stSidebar"] [data-testid="baseButton-header"] { display: none !important; }
+/* Make collapsed expand button invisible but still clickable by JS          */
+[data-testid="collapsedControl"],
+[data-testid="stSidebarCollapsedControl"] {
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
+/* ── Main content — no header, start at very top ── */
 .block-container {
     padding-top: 1.5rem !important;
     padding-bottom: 1rem !important;
 }
 
-/* ── Sidebar — pin logo flush to the very top ── */
-section[data-testid="stSidebar"] > div:first-child {
+/* ── Sidebar — kill every layer of top padding ── */
+section[data-testid="stSidebar"],
+section[data-testid="stSidebar"] > div,
+section[data-testid="stSidebar"] > div > div,
+section[data-testid="stSidebar"] > div > div > div,
+[data-testid="stSidebarContent"],
+[data-testid="stSidebarUserContent"] {
     padding-top: 0 !important;
     margin-top: 0 !important;
 }
+/* Negative margin pulls logo flush to very top */
 section[data-testid="stSidebar"] .stImage {
+    margin-top: -3rem !important;
+    padding-top: 0 !important;
+    display: block !important;
+}
+section[data-testid="stSidebar"] .stImage > img {
     margin-top: 0 !important;
     padding-top: 0 !important;
+    display: block !important;
 }
 
-/* ── Sidebar nav buttons — look like nav links, not buttons ── */
+/* ── Sidebar nav buttons — compact nav links ── */
 section[data-testid="stSidebar"] .stButton > button {
     background: transparent !important;
     border: none !important;
-    border-radius: 8px !important;
+    border-radius: 6px !important;
     color: #94A3B8 !important;
-    font-size: 0.9rem !important;
+    font-size: 0.88rem !important;
     font-weight: 500 !important;
     text-align: left !important;
-    padding: 0.45rem 1rem !important;
-    margin: 1px 0 !important;
+    padding: 0.3rem 1rem !important;
+    margin: 0 !important;
     box-shadow: none !important;
     height: auto !important;
-    line-height: 1.4 !important;
+    min-height: 0 !important;
+    line-height: 1.6 !important;
     transition: background 0.15s, color 0.15s !important;
 }
 section[data-testid="stSidebar"] .stButton > button:hover {
     background: rgba(124,58,237,0.15) !important;
     color: #E2E8F0 !important;
 }
-/* Tighten gap between sidebar nav items */
-section[data-testid="stSidebar"] .stButton { margin-bottom: 0 !important; }
+/* Remove all vertical gap between nav items */
+section[data-testid="stSidebar"] .stButton,
+section[data-testid="stSidebar"] .stButton > div,
+section[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"],
+section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    gap: 0 !important;
+}
 
 /* ── Page h1 titles — no extra top gap ── */
 h1 { margin-top: 0.2rem !important; padding-top: 0 !important; }
 </style>
 """, unsafe_allow_html=True)
+
+
+# Force sidebar open on every load — clears any collapsed state from localStorage
+_components.html("""
+<script>
+(function() {
+    function forceExpand() {
+        try {
+            var doc = window.parent.document;
+            // Click the expand button if sidebar is currently collapsed
+            var btn = doc.querySelector(
+                '[data-testid="collapsedControl"] button, ' +
+                '[data-testid="stSidebarCollapsedControl"] button'
+            );
+            if (btn) { btn.click(); return; }
+            // Also clear any localStorage entry that keeps sidebar collapsed
+            var store = window.parent.localStorage;
+            Object.keys(store).forEach(function(k) {
+                if (k.toLowerCase().includes('sidebar')) store.removeItem(k);
+            });
+        } catch(e) {}
+    }
+    forceExpand();
+    setTimeout(forceExpand, 200);
+    setTimeout(forceExpand, 600);
+})();
+</script>
+""", height=0)
 
 
 # ======================================================================
