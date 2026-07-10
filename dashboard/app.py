@@ -39,22 +39,53 @@ db = DatabaseManager(DB_PATH)
 # ── Global CSS ─────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* ── Strip Streamlit header down to just the sidebar toggle ── */
-/* Don't hide the whole header — sidebar toggle lives inside it  */
-header[data-testid="stHeader"] {
-    background: transparent !important;
-    border-bottom: none !important;
-    height: 2.5rem !important;
-    min-height: 2.5rem !important;
-}
+/* ── Hide Streamlit chrome but preserve sidebar toggle ── */
 [data-testid="stToolbar"]            { display: none !important; }
 [data-testid="stDecoration"]         { display: none !important; }
 #MainMenu                            { display: none !important; }
 footer                               { display: none !important; }
 
-/* ── Main content padding (slim header still occupies ~2.5rem) ── */
+/* Shrink header to near-zero but keep it so the toggle button inside works */
+header[data-testid="stHeader"] {
+    background: #0e1117 !important;
+    height: 0px !important;
+    min-height: 0px !important;
+    overflow: visible !important;
+}
+
+/* Make the sidebar expand/collapse toggle always visible and styled */
+[data-testid="collapsedControl"],
+[data-testid="stSidebarCollapsedControl"] {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    position: fixed !important;
+    top: 50% !important;
+    left: 0 !important;
+    z-index: 9999 !important;
+    transform: translateY(-50%) !important;
+}
+[data-testid="collapsedControl"] button,
+[data-testid="stSidebarCollapsedControl"] button {
+    background: rgba(124,58,237,0.25) !important;
+    color: #C4B5FD !important;
+    border: 1px solid rgba(124,58,237,0.4) !important;
+    border-radius: 0 8px 8px 0 !important;
+    width: 1.4rem !important;
+    height: 3rem !important;
+    padding: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+[data-testid="collapsedControl"] button:hover,
+[data-testid="stSidebarCollapsedControl"] button:hover {
+    background: rgba(124,58,237,0.45) !important;
+}
+
+/* ── Main content — no header overhead ── */
 .block-container {
-    padding-top: 2rem !important;
+    padding-top: 1.5rem !important;
     padding-bottom: 1rem !important;
 }
 
