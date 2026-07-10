@@ -46,6 +46,9 @@ header[data-testid="stHeader"]       { display: none !important; }
 #MainMenu                            { display: none !important; }
 footer                               { display: none !important; }
 
+/* ── Keep the sidebar collapse/expand toggle always visible ── */
+[data-testid="collapsedControl"]     { display: flex !important; }
+
 /* ── Main content — start right at top since header is gone ── */
 .block-container {
     padding-top: 1.5rem !important;
