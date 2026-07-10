@@ -39,19 +39,22 @@ db = DatabaseManager(DB_PATH)
 # ── Global CSS ─────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* ── Hide Streamlit chrome (Deploy button, hamburger, toolbar) ── */
-header[data-testid="stHeader"]       { display: none !important; }
+/* ── Strip Streamlit header down to just the sidebar toggle ── */
+/* Don't hide the whole header — sidebar toggle lives inside it  */
+header[data-testid="stHeader"] {
+    background: transparent !important;
+    border-bottom: none !important;
+    height: 2.5rem !important;
+    min-height: 2.5rem !important;
+}
 [data-testid="stToolbar"]            { display: none !important; }
 [data-testid="stDecoration"]         { display: none !important; }
 #MainMenu                            { display: none !important; }
 footer                               { display: none !important; }
 
-/* ── Keep the sidebar collapse/expand toggle always visible ── */
-[data-testid="collapsedControl"]     { display: flex !important; }
-
-/* ── Main content — start right at top since header is gone ── */
+/* ── Main content padding (slim header still occupies ~2.5rem) ── */
 .block-container {
-    padding-top: 1.5rem !important;
+    padding-top: 2rem !important;
     padding-bottom: 1rem !important;
 }
 
