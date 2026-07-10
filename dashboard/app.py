@@ -39,37 +39,30 @@ db = DatabaseManager(DB_PATH)
 # ── Global CSS ─────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* Remove default top padding so content starts at the top */
-.block-container { padding-top: 1.2rem !important; }
+/* ── Hide Streamlit chrome (Deploy button, hamburger, toolbar) ── */
+header[data-testid="stHeader"]       { display: none !important; }
+[data-testid="stToolbar"]            { display: none !important; }
+[data-testid="stDecoration"]         { display: none !important; }
+#MainMenu                            { display: none !important; }
+footer                               { display: none !important; }
 
-/* Tighten sidebar top padding */
-section[data-testid="stSidebar"] > div:first-child { padding-top: 0.75rem !important; }
-
-/* Hide the default radio widget entirely — we use our own nav */
-div[data-testid="stSidebarNav"] { display: none; }
-
-/* Custom nav button style */
-.zg-nav-btn {
-    display: block;
-    width: 100%;
-    padding: 0.55rem 1rem;
-    margin: 2px 0;
-    border-radius: 8px;
-    border: none;
-    background: transparent;
-    color: #94A3B8;
-    font-size: 0.9rem;
-    font-weight: 500;
-    text-align: left;
-    cursor: pointer;
-    transition: background 0.15s, color 0.15s;
-    text-decoration: none;
+/* ── Main content — start right at top since header is gone ── */
+.block-container {
+    padding-top: 1.5rem !important;
+    padding-bottom: 1rem !important;
 }
-.zg-nav-btn:hover { background: rgba(124,58,237,0.12); color: #E2E8F0; }
-.zg-nav-btn.active { background: rgba(124,58,237,0.25); color: #C4B5FD; font-weight: 600; }
-.zg-nav-icon { margin-right: 0.6rem; font-size: 1rem; }
 
-/* Re-style Streamlit sidebar buttons to look like nav links */
+/* ── Sidebar — pin logo flush to the very top ── */
+section[data-testid="stSidebar"] > div:first-child {
+    padding-top: 0 !important;
+    margin-top: 0 !important;
+}
+section[data-testid="stSidebar"] .stImage {
+    margin-top: 0 !important;
+    padding-top: 0 !important;
+}
+
+/* ── Sidebar nav buttons — look like nav links, not buttons ── */
 section[data-testid="stSidebar"] .stButton > button {
     background: transparent !important;
     border: none !important;
@@ -78,17 +71,22 @@ section[data-testid="stSidebar"] .stButton > button {
     font-size: 0.9rem !important;
     font-weight: 500 !important;
     text-align: left !important;
-    padding: 0.5rem 1rem !important;
+    padding: 0.45rem 1rem !important;
+    margin: 1px 0 !important;
     box-shadow: none !important;
+    height: auto !important;
+    line-height: 1.4 !important;
     transition: background 0.15s, color 0.15s !important;
 }
 section[data-testid="stSidebar"] .stButton > button:hover {
-    background: rgba(124,58,237,0.12) !important;
+    background: rgba(124,58,237,0.15) !important;
     color: #E2E8F0 !important;
 }
+/* Tighten gap between sidebar nav items */
+section[data-testid="stSidebar"] .stButton { margin-bottom: 0 !important; }
 
-/* Page titles — tighter top margin */
-h1 { margin-top: 0 !important; padding-top: 0 !important; }
+/* ── Page h1 titles — no extra top gap ── */
+h1 { margin-top: 0.2rem !important; padding-top: 0 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -166,35 +164,38 @@ if _logo_path.exists():
 else:
     st.sidebar.markdown("## ⚡ Zignal")
 
+st.sidebar.markdown("<hr style='margin:0.4rem 0 0.6rem 0; border-color:rgba(255,255,255,0.08)'>", unsafe_allow_html=True)
+
 # Custom sidebar navigation
 _NAV_ITEMS = [
-    ("Live",         "🟢"),
-    ("Analyze",      "🔍"),
-    ("Signal Audit", "📊"),
-    ("Backtests",    "📈"),
-    ("Trades",       "📋"),
-    ("Settings",     "⚙️"),
+    ("Live",         "●  Live"),
+    ("Analyze",      "◎  Analyze"),
+    ("Signal Audit", "≋  Signal Audit"),
+    ("Backtests",    "⌁  Backtests"),
+    ("Trades",       "≡  Trades"),
+    ("Settings",     "✦  Settings"),
 ]
 
 if "page" not in st.session_state:
     st.session_state["page"] = "Analyze"
 
-st.sidebar.markdown("<div style='margin-top:0.5rem'></div>", unsafe_allow_html=True)
-for _label, _icon in _NAV_ITEMS:
-    _active = "active" if st.session_state["page"] == _label else ""
+for _page_key, _label in _NAV_ITEMS:
     if st.sidebar.button(
-        f"{_icon}  {_label}",
-        key=f"nav_{_label}",
+        _label,
+        key=f"nav_{_page_key}",
         use_container_width=True,
         type="secondary",
     ):
-        st.session_state["page"] = _label
+        st.session_state["page"] = _page_key
         st.rerun()
 
 page = st.session_state["page"]
 
-st.sidebar.markdown("<div style='margin-top:auto; padding-top:1rem'></div>", unsafe_allow_html=True)
-st.sidebar.caption("⚡ Auto-refreshes every 30s on Live")
+st.sidebar.markdown("<div style='flex:1'></div>", unsafe_allow_html=True)
+st.sidebar.markdown(
+    "<p style='font-size:0.72rem;color:#475569;padding:0.5rem 0 0 0.5rem'>⚡ Live page auto-refreshes every 30s</p>",
+    unsafe_allow_html=True,
+)
 
 
 # ======================================================================
