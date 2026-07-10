@@ -1476,8 +1476,8 @@ elif page == "Signal Audit":
     c1, c2, c3 = st.columns(3)
     sa_symbol  = c1.text_input("Symbol", "MSFT").upper().strip()
     _today     = _dt.date.today()
-    sa_start   = c2.date_input("Start date", _today - _dt.timedelta(days=180), key="sa_start")
-    sa_end     = c3.date_input("End date",   _today,                            key="sa_end")
+    sa_start   = c2.date_input("Start date", _today - _dt.timedelta(days=90), key="sa_start")
+    sa_end     = c3.date_input("End date",   _today,                           key="sa_end")
 
     c4, c5, c6, c7 = st.columns(4)
     sa_step    = c4.number_input(
