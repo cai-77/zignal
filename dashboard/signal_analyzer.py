@@ -389,24 +389,35 @@ def analyze(df: pd.DataFrame, symbol: str, vrs_cfg: dict) -> AnalysisResult:
                     f"needs to dip below {rsi_oversold:.0f} to qualify as an oversold setup"
                 )
         else:
+            if rsi_now > rsi_prev and rsi_now <= rsi_3ago:
+                _rsi_curl_msg = (
+                    f"RSI ticked up day-over-day ({rsi_prev:.1f} → {rsi_now:.1f}), "
+                    f"but the 3-bar trend is still declining ({rsi_3ago:.1f} → {rsi_now:.1f}). "
+                    f"Momentum confirmation remains incomplete — wait for the 3-bar trend to confirm the curl"
+                )
+            else:
+                _rsi_curl_msg = (
+                    f"RSI is declining day-over-day ({rsi_prev:.1f} → {rsi_now:.1f}) "
+                    f"and the 3-bar trend also points down ({rsi_3ago:.1f} → {rsi_now:.1f}). "
+                    f"Momentum confirmation is incomplete"
+                )
             result.verdict_reason = (
-                f"RSI dipped to {rsi_min_val:.1f} ({bars_ago} bars ago) and has recovered to {rsi_now:.1f}, "
-                f"but is still falling ({rsi_prev:.1f}→{rsi_now:.1f}) — sellers not exhausted yet. "
-                f"Wait for RSI to tick higher before entering"
+                f"RSI dipped to {rsi_min_val:.1f} ({bars_ago} bar{'s' if bars_ago != 1 else ''} ago) "
+                f"and recovered to {rsi_now:.1f}. {_rsi_curl_msg}"
             )
     elif not vol_passed:
         result.verdict = "WAIT"
         result.verdict_reason = (
             f"RSI and SMA conditions met but volume accumulation not confirmed "
             f"(up-day vol = {vol_ratio:.1%} of down-day vol, need ≥ {dry_up_ratio:.1%}). "
-            f"Sellers still have the edge — wait for buyers to step in"
+            f"Buyer participation not yet confirmed — wait for up-day volume to improve"
         )
     else:
         result.verdict = "ENTER"
         result.verdict_reason = (
             "All entry conditions satisfied: RSI oversold and curling, "
             f"SMA{sma_period} flattening, volume accumulation confirmed, "
-            "no institutional dumping detected"
+            "no distribution pressure detected"
         )
 
     return result

@@ -874,6 +874,8 @@ elif page == "Analyze":
             "earnings": earnings_ctx,
             "news_count": len(news_ctx) if news_ctx else 0,
             "insider_count": len(insider_ctx) if insider_ctx else 0,
+            "news_articles": news_ctx or [],
+            "insider_transactions": insider_ctx or [],
         }
         st.session_state.az_llm_result   = llm_res
         st.session_state.az_llm_ctx_meta = ctx_meta
@@ -993,6 +995,35 @@ elif page == "Analyze":
             return "Conflict / Needs Review"
         return "Agree"
 
+    def _check_consistency(result, llm_result, final_action, meta):
+        """Return list of human-readable warning strings for visible contradictions."""
+        warnings = []
+        if result.verdict == "REJECT" and final_action not in ("AVOID", "EXIT", "TRIM"):
+            warnings.append(
+                f"Rule Engine issued REJECT but Final Action is '{final_action}'. "
+                "Review AI reasoning — a REJECT normally maps to AVOID."
+            )
+        rsi_cond = next((c for c in result.conditions if "RSI" in c.name), None)
+        if rsi_cond:
+            if not rsi_cond.passed and "curl" in rsi_cond.detail.lower() and "PASS" in rsi_cond.detail:
+                warnings.append("RSI condition text says PASS but condition is marked failed — check detail text.")
+        if llm_result and not getattr(llm_result, "error", None):
+            if result.verdict == "ENTER" and llm_result.verdict == "REJECT":
+                warnings.append(
+                    "Rule Engine says ENTER but AI says REJECT. "
+                    "Read AI analysis carefully — there may be a context risk the rules missed."
+                )
+        insiders = meta.get("insider_transactions", [])
+        non_market_used = [t for t in insiders if not t.get("is_market_signal") and t.get("shares", 0) > 0]
+        if non_market_used and llm_result and not getattr(llm_result, "error", None):
+            if any("insider" in obs.lower() and "buy" in obs.lower()
+                   for obs in (llm_result.key_observations or [])):
+                warnings.append(
+                    "Insider data contains non-open-market transactions. "
+                    "Verify the AI did not misclassify grants or option exercises as bullish buys."
+                )
+        return warnings
+
     # ── Display Layer 1 results (persisted in session state) ──────────
     if st.session_state.az_result is not None:
         result          = st.session_state.az_result
@@ -1083,6 +1114,14 @@ elif page == "Analyze":
             f'volume, and distribution-day counts reflect data through <b>{_candle_str}</b> only.'
             f'</div>'
         ) if _data_gap else ""
+
+        # Consistency warnings
+        _cw_meta = st.session_state.get("az_llm_ctx_meta") or {}
+        _consistency_warns = _check_consistency(result, _llm_now, _final_action, _cw_meta)
+        if _consistency_warns:
+            with st.expander("⚠ Report Consistency Warnings", expanded=True):
+                for _w in _consistency_warns:
+                    st.warning(_w)
 
         st.markdown(f"""
 <div style="background:#111827;border:1px solid #1f2937;border-radius:12px;padding:20px 24px;margin-bottom:4px">
@@ -1342,11 +1381,32 @@ elif page == "Analyze":
                                 _fresh_days = (_dt2.date.fromisoformat(_e['date']) - _dt2.date.today()).days
                             except Exception:
                                 _fresh_days = _e.get("days_away", "?")
-                            _ctx_parts.append(f"Earnings: {_e['date']} ({_fresh_days}d away — verify independently)")
-                        if meta.get("news_count"):
-                            _ctx_parts.append(f"{meta['news_count']} recent news articles")
-                        if meta.get("insider_count"):
-                            _ctx_parts.append(f"{meta['insider_count']} insider transactions")
+                            _conf_h = _e.get("confidence", "estimated").upper()
+                            _src_h  = _e.get("source", "Finnhub")
+                            _ctx_parts.append(f"Earnings: {_e['date']} ({_fresh_days}d away) — {_conf_h} ({_src_h}) — verify independently")
+                        _news_h = meta.get("news_articles", [])
+                        if _news_h:
+                            _news_li = "".join(
+                                f"<li>[{a['date']}] <b>{a.get('source','')}</b>: {a['headline']}"
+                                + (f' <a href="{a["url"]}">[link]</a>' if a.get("url") else "")
+                                + "</li>"
+                                for a in _news_h
+                            )
+                            _ctx_parts.append(f"News ({len(_news_h)} articles, Finnhub):<ul>{_news_li}</ul>")
+                        elif meta.get("news_count"):
+                            _ctx_parts.append(f"{meta['news_count']} recent news articles (Finnhub)")
+                        _ins_h = meta.get("insider_transactions", [])
+                        if _ins_h:
+                            _ins_li = "".join(
+                                f"<li>[{t['date']}] {t['name']} — {t['action']} {t['shares']:,} shares"
+                                + (f" @ ${t['price']:.2f}" if t.get("price") else "")
+                                + (" <em>(market signal)</em>" if t.get("is_market_signal") else " <em>(not a market signal)</em>")
+                                + f" — {t.get('source','Finnhub')}</li>"
+                                for t in _ins_h
+                            )
+                            _ctx_parts.append(f"Insider transactions ({len(_ins_h)}, SEC Form 4 via Finnhub):<ul>{_ins_li}</ul>")
+                        elif meta.get("insider_count"):
+                            _ctx_parts.append(f"{meta['insider_count']} insider transactions (Finnhub / SEC Form 4)")
                         _ctx_html = "".join(f"<li>{p}</li>" for p in _ctx_parts) or "<li>Price / indicator data only</li>"
 
                         # Chart — rebuild from session state data
@@ -1599,17 +1659,50 @@ elif page == "Analyze":
                 if llm_result.watch_for:
                     st.info(f"**Watch for:** {_md(llm_result.watch_for)}")
 
+                # Context Used section
+                with st.expander("Context Used", expanded=False):
+                    if meta.get("market"):
+                        st.markdown("**Market context:** SPY / VIXY (Polygon)")
+                    if meta.get("earnings"):
+                        _e = meta["earnings"]
+                        try:
+                            import datetime as _dt2
+                            _fresh_days = (_dt2.date.fromisoformat(_e['date']) - _dt2.date.today()).days
+                        except Exception:
+                            _fresh_days = _e.get("days_away", "?")
+                        _conf  = _e.get("confidence", "estimated").upper()
+                        _esrc  = _e.get("source", "Finnhub")
+                        _eretr = _e.get("retrieved", "unknown")
+                        st.markdown(
+                            f"**Earnings:** {_e['date']} ({_fresh_days}d away) · "
+                            f"{_conf} · Source: {_esrc} · Retrieved: {_eretr}"
+                        )
+                    articles = meta.get("news_articles", [])
+                    if articles:
+                        st.markdown(f"**News ({len(articles)} articles, Finnhub):**")
+                        for _art in articles:
+                            _url_part = f" — [{_art['source']}]({_art['url']})" if _art.get("url") else f" — {_art.get('source','')}"
+                            st.markdown(f"- [{_art['date']}] {_art['headline']}{_url_part}")
+                    insiders = meta.get("insider_transactions", [])
+                    if insiders:
+                        st.markdown(f"**Insider transactions ({len(insiders)}, Finnhub / SEC Form 4):**")
+                        for _ins in insiders:
+                            _sig = " ✓ market signal" if _ins.get("is_market_signal") else " ⚠ not a market signal"
+                            _pstr = f" @ ${_ins['price']:.2f}" if _ins.get("price") else ""
+                            st.markdown(
+                                f"- [{_ins['date']}] {_ins['name']} — {_ins['action']} "
+                                f"{_ins['shares']:,} shares{_pstr}{_sig}"
+                            )
+                    if not meta.get("market") and not articles and not insiders and not meta.get("earnings"):
+                        st.markdown("Price and indicator data only.")
+
                 ctx_parts = []
                 if meta.get("market"):
                     ctx_parts.append("market context")
                 if meta.get("earnings"):
                     _e = meta["earnings"]
-                    try:
-                        import datetime as _dt2
-                        _fresh_days = (_dt2.date.fromisoformat(_e['date']) - _dt2.date.today()).days
-                    except Exception:
-                        _fresh_days = _e.get("days_away", "?")
-                    ctx_parts.append(f"earnings {_e['date']} ({_fresh_days}d away — verify independently)")
+                    _conf = _e.get("confidence", "estimated")
+                    ctx_parts.append(f"earnings {_e['date']} ({_conf})")
                 if meta.get("news_count"):
                     ctx_parts.append(f"{meta['news_count']} news articles")
                 if meta.get("insider_count"):

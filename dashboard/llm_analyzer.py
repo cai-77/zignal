@@ -96,6 +96,9 @@ def fetch_earnings_context(symbol: str, finnhub_key: str) -> Optional[dict]:
                 "days_away": (earnings_date - today).days,
                 "eps_estimate": ev.get("epsEstimate"),
                 "hour": ev.get("hour", ""),  # bmo | amc | dmh
+                "source": "Finnhub",
+                "retrieved": today.isoformat(),
+                "confidence": "estimated",
             }
     except Exception:
         pass
@@ -133,6 +136,7 @@ def fetch_news_context(symbol: str, finnhub_key: str, days: int = 14, start_date
                 "headline": headline,
                 "summary": summary,
                 "source": a.get("source", ""),
+                "url": a.get("url", ""),
             })
         return results
     except Exception:
@@ -140,7 +144,7 @@ def fetch_news_context(symbol: str, finnhub_key: str, days: int = 14, start_date
 
 
 def fetch_insider_context(symbol: str, finnhub_key: str, days: int = 90, start_date: Optional[str] = None) -> list[dict]:
-    """Insider buys/sells from start_date (or last `days` days) to today. Returns [] on failure."""
+    """Insider transactions from start_date (or last `days` days) to today. Returns [] on failure."""
     try:
         import finnhub
         client = finnhub.Client(api_key=finnhub_key)
@@ -150,19 +154,41 @@ def fetch_insider_context(symbol: str, finnhub_key: str, days: int = 90, start_d
         transactions = resp.get("data", []) if isinstance(resp, dict) else []
         if not transactions:
             return []
+        # SEC Form 4 transaction codes that indicate a clear directional signal
+        _OPEN_BUY  = {"P"}           # open-market purchase
+        _OPEN_SELL = {"S"}           # open-market sale
         results = []
         for t in sorted(transactions, key=lambda x: x.get("transactionDate", ""), reverse=True)[:10]:
-            change = t.get("change", 0) or 0
-            price = t.get("transactionPrice") or 0
-            value = abs(change * price) if price else None
+            change   = t.get("change", 0) or 0
+            price    = t.get("transactionPrice") or 0
+            value    = abs(change * price) if price else None
+            tx_code  = (t.get("transactionCode") or "").strip().upper()
+            if tx_code in _OPEN_BUY:
+                action_label   = "OPEN-MARKET BUY"
+                is_mkt_signal  = True
+            elif tx_code in _OPEN_SELL:
+                action_label   = "OPEN-MARKET SALE"
+                is_mkt_signal  = True
+            elif change > 0:
+                action_label   = f"ACQUISITION (code: {tx_code or 'unknown'})"
+                is_mkt_signal  = False
+            elif change < 0:
+                action_label   = f"DISPOSITION (code: {tx_code or 'unknown'})"
+                is_mkt_signal  = False
+            else:
+                action_label   = f"TRANSACTION (code: {tx_code or 'unknown'})"
+                is_mkt_signal  = False
             results.append({
-                "date": t.get("transactionDate", ""),
-                "name": t.get("name", "Unknown"),
-                "action": "BUY" if change > 0 else "SELL",
-                "shares": abs(int(change)),
-                "price": float(price) if price else None,
-                "value_usd": value,
-                "filing_date": t.get("filingDate", ""),
+                "date":             t.get("transactionDate", ""),
+                "name":             t.get("name", "Unknown"),
+                "action":           action_label,
+                "shares":           abs(int(change)),
+                "price":            float(price) if price else None,
+                "value_usd":        value,
+                "filing_date":      t.get("filingDate", ""),
+                "transaction_code": tx_code,
+                "is_market_signal": is_mkt_signal,
+                "source":           "Finnhub / SEC Form 4",
             })
         return results
     except Exception:
@@ -315,7 +341,27 @@ def build_prompt(
             "  • Does the market environment support or work against this setup?\n"
             "  • Are there divergences or support/resistance levels visible in the data?\n\n"
             "Be direct and actionable. The trader decides — your analysis sharpens conviction "
-            "or raises the right flags."
+            "or raises the right flags.\n\n"
+            "Report quality rules — follow strictly:\n"
+            "1. RSI wording: Always distinguish (a) 1-day RSI change from (b) 3-bar RSI trend. "
+            "   Never say 'RSI is curling up' or 'momentum confirmed' if the rule engine marked "
+            "   the RSI curl condition as FAIL. If RSI is up day-over-day but the 3-bar trend is "
+            "   down, state both explicitly.\n"
+            "2. Language: Do not use 'sellers exhausted', 'buyers in control', 'classic bottom', "
+            "   'this is a bottom', or 'institutional dumping'. Use instead: "
+            "   'momentum confirmation incomplete', 'possible capitulation-style low', "
+            "   'distribution pressure', 'buyer participation improving but not confirmed', "
+            "   'high-volume selling pressure'.\n"
+            "3. Insider transactions: Only code 'P' (open-market purchase) is a bullish insider signal. "
+            "   Grants, awards, option exercises, tax withholding are not signals. Do not call a "
+            "   non-open-market transaction bullish. If type is unclear, say so.\n"
+            "4. Earnings: Note whether the date is confirmed or estimated. Do not state an estimated "
+            "   date as a hard fact.\n"
+            "5. News claims: When you say a selloff is macro/sector-driven rather than company-specific, "
+            "   reference specific headlines from the provided news data to support that claim. "
+            "   If the news does not clearly support it, soften the statement.\n"
+            "6. Internal consistency: Your analysis and key_observations must use the same RSI values "
+            "   and price levels shown in the rule engine results. Do not introduce different numbers."
         )
 
     # ── User message — assemble sections ──────────────────────────────
@@ -350,10 +396,15 @@ def build_prompt(
             warning = "\n⚠ WARNING: Earnings within 3 weeks — factor announcement risk into position size and hold duration"
         elif e["days_away"] <= 45:
             warning = "\nNote: Earnings within ~45 days — plan your exit timeline accordingly"
+        confidence  = e.get("confidence", "estimated")
+        source      = e.get("source", "Finnhub")
+        retrieved   = e.get("retrieved", "unknown")
+        conf_label  = confidence.upper()
         body = (
             f"Next earnings: {e['date']}{hour_str} — {e['days_away']} days away{eps_str}{warning}\n"
-            f"⚠ Data source: Finnhub earnings calendar (free tier). Dates may be unconfirmed or "
-            f"subject to change. Always verify the earnings date independently before trading."
+            f"Date confidence: {conf_label} · Source: {source} · Retrieved: {retrieved}\n"
+            f"⚠ This is an {confidence} date from {source}. "
+            f"Do not treat this as a hard-confirmed date. Verify independently before trading around this event."
         )
         parts.append(_section("EARNINGS RISK", body))
     else:
@@ -374,13 +425,22 @@ def build_prompt(
     if insider_ctx:
         insider_lines = []
         for t in insider_ctx:
-            val_str = f"  (${t['value_usd']:,.0f})" if t.get("value_usd") else ""
-            price_str = f" @ ${t['price']:.2f}" if t.get("price") else ""
+            val_str    = f"  (${t['value_usd']:,.0f})" if t.get("value_usd") else ""
+            price_str  = f" @ ${t['price']:.2f}" if t.get("price") else ""
+            code_str   = f"  [SEC code: {t['transaction_code']}]" if t.get("transaction_code") else ""
+            signal_str = "" if t.get("is_market_signal") else "  ⚠ not an open-market transaction"
             insider_lines.append(
                 f"[{t['date']}] {t['name']} — {t['action']}  "
                 f"{t['shares']:,} shares{price_str}{val_str}"
+                f"  (filed: {t.get('filing_date', 'n/a')}){code_str}{signal_str}"
             )
-        parts.append(_section("INSIDER TRANSACTIONS (last 90 days)", "\n".join(insider_lines)))
+        insider_lines.append(
+            "\nIMPORTANT: Only SEC code 'P' (open-market purchase) or 'S' (open-market sale) are "
+            "directional signals. Grants (A), option exercises (M/X), tax withholding (F), and "
+            "gifts (G) are administrative transactions — do NOT treat them as bullish or bearish signals. "
+            "If transaction type is unclear, say so explicitly rather than implying directional intent."
+        )
+        parts.append(_section("INSIDER TRANSACTIONS (last 90 days — Finnhub / SEC Form 4)", "\n".join(insider_lines)))
     else:
         parts.append(_section("INSIDER TRANSACTIONS (last 90 days)", "No recent insider transactions found"))
 
