@@ -24,6 +24,34 @@ from strategies.base_strategy import compute_rsi, compute_sma
 # Data fetch
 # ──────────────────────────────────────────────────────────────────────
 
+def _fetch_prev_close(symbol: str, api_key: str) -> Optional[pd.DataFrame]:
+    """
+    Fetch the previous close bar via Polygon's /prev endpoint.
+    This data is available on free-tier and finalises sooner than list_aggs,
+    so we use it to patch the most-recent-day gap when list_aggs lags behind.
+    """
+    try:
+        import requests
+        r = requests.get(
+            f"https://api.polygon.io/v2/aggs/ticker/{symbol.upper()}/prev",
+            params={"adjusted": "true", "apiKey": api_key},
+            timeout=10,
+        )
+        data = r.json()
+        if data.get("status") != "OK" or not data.get("results"):
+            return None
+        bar = data["results"][0]
+        ts = pd.to_datetime(bar["t"], unit="ms", utc=True)
+        row = {"open": bar["o"], "high": bar["h"], "low": bar["l"],
+               "close": bar["c"], "volume": bar["v"]}
+        df = pd.DataFrame([row], index=pd.DatetimeIndex([ts], name="timestamp"))
+        for col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+        return df
+    except Exception:
+        return None
+
+
 def fetch_bars(symbol: str, start: str, end: str, api_key: str) -> Optional[pd.DataFrame]:
     """
     Fetch adjusted daily OHLCV bars from Polygon.
@@ -70,6 +98,23 @@ def fetch_bars(symbol: str, start: str, end: str, api_key: str) -> Optional[pd.D
     df = pd.DataFrame(rows).set_index("timestamp").sort_index()
     for col in ("open", "high", "low", "close", "volume"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # list_aggs on Polygon free-tier finalises daily bars the morning after.
+    # The /prev endpoint has the same data available sooner — use it to fill
+    # any gap between the last returned bar and the requested end date.
+    import datetime as _dt
+    end_d = _dt.date.fromisoformat(end)
+    if df.index[-1].date() < end_d:
+        prev_df = _fetch_prev_close(symbol, api_key)
+        if prev_df is not None:
+            existing_dates = {ts.date() for ts in df.index}
+            new_rows = prev_df[
+                [ts.date() not in existing_dates and ts.date() <= end_d
+                 for ts in prev_df.index]
+            ]
+            if not new_rows.empty:
+                df = pd.concat([df, new_rows]).sort_index()
+
     return df
 
 
