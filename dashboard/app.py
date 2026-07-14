@@ -906,6 +906,10 @@ elif page == "Analyze":
             st.error(f"No data returned for **{symbol}**. Check the symbol and your Polygon API key.")
             st.stop()
 
+        # Detect actual latest candle vs requested end date
+        _latest_candle = df_full.index[-1].date()
+        _data_gap = _latest_candle < end_date  # True if provider didn't return up to requested date
+
         vrs_cfg = cfg.get("volume_rsi_swing", {})
         result  = (
             analyze_exit(df_full, symbol, vrs_cfg, cost_basis)
@@ -920,21 +924,23 @@ elif page == "Analyze":
         llm_cfg = cfg.get("llm", {})
 
         # Store Layer 1 results; clear any previous AI result
-        st.session_state.az_result        = result
-        st.session_state.az_df            = df_full
-        st.session_state.az_vrs_cfg       = vrs_cfg
-        st.session_state.az_symbol        = symbol
-        st.session_state.az_end_date      = end_date
-        st.session_state.az_start_date    = start_date
-        st.session_state.az_analysis_type = analysis_type
-        st.session_state.az_cost_basis    = cost_basis
-        st.session_state.az_polygon_key   = polygon_key
-        st.session_state.az_finnhub_key   = cfg.get("finnhub", {}).get("api_key", "")
-        st.session_state.az_llm_key       = _os.environ.get("ANTHROPIC_API_KEY") or llm_cfg.get("api_key", "")
-        st.session_state.az_llm_model     = llm_cfg.get("model", "claude-opus-4-8")
-        st.session_state.az_llm_result    = None
-        st.session_state.az_llm_ctx_meta  = None
-        st.session_state.az_cached_at     = None
+        st.session_state.az_result          = result
+        st.session_state.az_df              = df_full
+        st.session_state.az_vrs_cfg         = vrs_cfg
+        st.session_state.az_symbol          = symbol
+        st.session_state.az_end_date        = end_date
+        st.session_state.az_start_date      = start_date
+        st.session_state.az_analysis_type   = analysis_type
+        st.session_state.az_cost_basis      = cost_basis
+        st.session_state.az_polygon_key     = polygon_key
+        st.session_state.az_finnhub_key     = cfg.get("finnhub", {}).get("api_key", "")
+        st.session_state.az_llm_key         = _os.environ.get("ANTHROPIC_API_KEY") or llm_cfg.get("api_key", "")
+        st.session_state.az_llm_model       = llm_cfg.get("model", "claude-opus-4-8")
+        st.session_state.az_llm_result      = None
+        st.session_state.az_llm_ctx_meta    = None
+        st.session_state.az_cached_at       = None
+        st.session_state.az_latest_candle   = _latest_candle
+        st.session_state.az_data_gap        = _data_gap
 
         # Auto-run AI immediately if checkbox enabled and verdict warrants it
         if auto_ai and result.verdict in ("ENTER", "WAIT") and st.session_state.az_llm_key:
@@ -989,13 +995,15 @@ elif page == "Analyze":
 
     # ── Display Layer 1 results (persisted in session state) ──────────
     if st.session_state.az_result is not None:
-        result        = st.session_state.az_result
-        df_full       = st.session_state.az_df
-        vrs_cfg       = st.session_state.az_vrs_cfg
-        symbol        = st.session_state.az_symbol
-        end_date      = st.session_state.az_end_date
-        start_date    = st.session_state.az_start_date
-        analysis_type = st.session_state.az_analysis_type
+        result          = st.session_state.az_result
+        df_full         = st.session_state.az_df
+        vrs_cfg         = st.session_state.az_vrs_cfg
+        symbol          = st.session_state.az_symbol
+        end_date        = st.session_state.az_end_date
+        start_date      = st.session_state.az_start_date
+        analysis_type   = st.session_state.az_analysis_type
+        _latest_candle  = st.session_state.get("az_latest_candle", df_full.index[-1].date())
+        _data_gap       = st.session_state.get("az_data_gap", False)
 
         # ── Trade Decision Summary ─────────────────────────────────────
         _llm_now      = st.session_state.az_llm_result
@@ -1058,9 +1066,27 @@ elif page == "Analyze":
         _next_act_cell = _next_act if _next_act != "—" else _PENDING
         _conf_badge    = f'&nbsp;<span style="color:#4b5563;font-size:0.8rem">({_conf_str} confidence)</span>' if _conf_str else ""
 
+        # Market data currency
+        _candle_str  = str(_latest_candle)
+        _candle_cell = (
+            f'<span style="color:#f59e0b;font-weight:600">{_candle_str}</span>'
+            if _data_gap else
+            f'<span style="color:#00c853;font-weight:600">{_candle_str}</span>'
+        )
+        _data_gap_html = (
+            f'<div style="background:#422006;border:1px solid #92400e;border-radius:6px;'
+            f'padding:8px 12px;margin-top:10px;font-size:0.83rem;color:#fcd34d">'
+            f'⚠ Data gap: report requested through <b>{end_date}</b> but Polygon only returned '
+            f'data through <b>{_candle_str}</b>. The <b>{_candle_str}</b> candle may not yet '
+            f'be finalized by the data provider (free-tier daily aggregates are typically '
+            f'available after the following morning). All rule-engine conditions, RSI, SMA, '
+            f'volume, and distribution-day counts reflect data through <b>{_candle_str}</b> only.'
+            f'</div>'
+        ) if _data_gap else ""
+
         st.markdown(f"""
 <div style="background:#111827;border:1px solid #1f2937;border-radius:12px;padding:20px 24px;margin-bottom:4px">
-  <div style="font-size:0.72rem;letter-spacing:3px;color:#6b7280;margin-bottom:14px;font-weight:600">TRADE DECISION SUMMARY &nbsp;·&nbsp; {str(df_full.index[-1])[:10]}</div>
+  <div style="font-size:0.72rem;letter-spacing:3px;color:#6b7280;margin-bottom:14px;font-weight:600">TRADE DECISION SUMMARY &nbsp;·&nbsp; requested: {end_date}</div>
 
   <div style="display:flex;align-items:flex-start;gap:16px;margin-bottom:16px;flex-wrap:wrap">
     <span style="background:{_fa_color};color:white;padding:8px 20px;border-radius:8px;font-size:1.25rem;font-weight:700;letter-spacing:2px;white-space:nowrap">{_final_action}</span>
@@ -1068,6 +1094,10 @@ elif page == "Analyze":
   </div>
 
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px 24px;margin-bottom:14px">
+    <div>
+      <div style="color:#6b7280;font-size:0.72rem;letter-spacing:1px;margin-bottom:3px">MARKET DATA THROUGH</div>
+      {_candle_cell}
+    </div>
     <div>
       <div style="color:#6b7280;font-size:0.72rem;letter-spacing:1px;margin-bottom:3px">RULE ENGINE</div>
       <span style="color:{_l1_color};font-weight:600">{_l1_display}</span>
@@ -1082,6 +1112,8 @@ elif page == "Analyze":
       {_al_cell}
     </div>
   </div>
+
+  {_data_gap_html}
 
   <hr style="border-color:#1f2937;margin:12px 0">
 
@@ -1393,6 +1425,15 @@ elif page == "Analyze":
                         _alignment_h      = _compute_alignment(result.verdict, llm_result.verdict, analysis_type)
                         _main_reason_h    = (result.verdict_reason.split('.')[0] + '.'
                                              if '.' in result.verdict_reason else result.verdict_reason)
+                        _candle_str_h     = str(_latest_candle)
+                        _data_gap_html_h  = (
+                            f'<p style="background:#fff3cd;border-left:4px solid #e65100;padding:8px 12px;'
+                            f'border-radius:0 4px 4px 0;font-size:0.88rem;margin:8px 0">'
+                            f'⚠ <b>Data gap:</b> report requested through <b>{end_date}</b> but Polygon '
+                            f'only returned data through <b>{_candle_str_h}</b>. All conditions, RSI, SMA, '
+                            f'volume, and chart reflect data through <b>{_candle_str_h}</b> only. '
+                            f'Free-tier daily aggregates are typically finalized the following morning.</p>'
+                        ) if _data_gap else ""
 
                         return f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
@@ -1433,23 +1474,28 @@ elif page == "Analyze":
 </p>
 
 <div style="background:#f8f9fa;border:1px solid #dee2e6;border-radius:8px;padding:18px 22px;margin-bottom:24px">
-  <div style="font-size:0.72rem;letter-spacing:2px;color:#6c757d;font-weight:600;margin-bottom:12px">TRADE DECISION SUMMARY</div>
+  <div style="font-size:0.72rem;letter-spacing:2px;color:#6c757d;font-weight:600;margin-bottom:12px">TRADE DECISION SUMMARY &nbsp;·&nbsp; requested: {end_date}</div>
   <div style="margin-bottom:12px">
     <span style="background:{_fa_color_h};color:white;padding:6px 18px;border-radius:6px;font-size:1.1rem;font-weight:700;letter-spacing:2px">{_final_action_h}</span>
     &nbsp;&nbsp;<span style="color:#6c757d;font-size:0.9rem">{_main_reason_h}</span>
   </div>
+  {_data_gap_html_h}
   <table style="width:100%;font-size:0.88rem;border-collapse:collapse;margin-bottom:12px">
     <tr>
-      <td style="color:#6c757d;width:160px;padding:3px 0;font-size:0.75rem;letter-spacing:1px">RULE ENGINE</td>
-      <td style="font-weight:600;color:{_l1_verdict_color}">{_l1_display_label}</td>
+      <td style="color:#6c757d;width:160px;padding:3px 0;font-size:0.75rem;letter-spacing:1px">MARKET DATA THROUGH</td>
+      <td style="font-weight:600;color:{'#e65100' if _data_gap else '#2e7d32'}">{_candle_str_h}</td>
       <td style="color:#6c757d;width:160px;padding:3px 0 3px 24px;font-size:0.75rem;letter-spacing:1px">SETUP QUALITY</td>
       <td>{_sq_label_h}</td>
     </tr>
     <tr>
-      <td style="color:#6c757d;font-size:0.75rem;letter-spacing:1px">AI CONTEXT</td>
+      <td style="color:#6c757d;font-size:0.75rem;letter-spacing:1px">RULE ENGINE</td>
+      <td style="font-weight:600;color:{_l1_verdict_color}">{_l1_display_label}</td>
+      <td style="color:#6c757d;padding-left:24px;font-size:0.75rem;letter-spacing:1px">AI CONTEXT</td>
       <td style="font-weight:600;color:{_verdict_color}">{llm_result.verdict}</td>
-      <td style="color:#6c757d;padding-left:24px;font-size:0.75rem;letter-spacing:1px">ALIGNMENT</td>
-      <td>{_alignment_h or "—"}</td>
+    </tr>
+    <tr>
+      <td style="color:#6c757d;font-size:0.75rem;letter-spacing:1px">ALIGNMENT</td>
+      <td colspan="3">{_alignment_h or "—"}</td>
     </tr>
     <tr>
       <td style="color:#6c757d;font-size:0.75rem;letter-spacing:1px">ENTRY TRIGGER</td>
