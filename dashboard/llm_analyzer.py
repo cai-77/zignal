@@ -36,6 +36,10 @@ class LLMAnalysis:
     skipped: bool = False
     skip_reason: str = ""
     error: Optional[str] = None
+    entry_trigger: str = ""
+    invalidation_level: str = ""
+    position_guidance: str = ""
+    final_action: str = ""
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -460,6 +464,96 @@ def _build_tool_def(analysis_type: str) -> dict:
             "CAUTION = rules say enter but context raises meaningful risk."
         )
 
+    base_properties = {
+        "verdict": {
+            "type": "string",
+            "enum": verdict_enum,
+            "description": verdict_desc,
+        },
+        "confidence": {
+            "type": "string",
+            "enum": ["high", "medium", "low"],
+            "description": "Overall confidence given data quality and signal clarity.",
+        },
+        "summary": {
+            "type": "string",
+            "description": "One sentence headline summarising the setup and your verdict.",
+        },
+        "analysis": {
+            "type": "string",
+            "description": (
+                "3-5 sentence holistic analysis. Connect the technical picture "
+                "with market context, news catalyst, earnings risk, and insider activity. "
+                "Explain what is driving your verdict beyond the mechanical rules."
+            ),
+        },
+        "key_observations": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "4-6 specific, concrete observations — from ANY of the context blocks "
+                "(news catalyst, insider signal, earnings proximity, market regime, "
+                "price-action divergence, volume pattern). Not just technical observations."
+            ),
+        },
+        "risks": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "3-5 key risks. Include earnings risk, news overhang, macro risk if relevant.",
+        },
+        "watch_for": {
+            "type": "string",
+            "description": (
+                "Concrete, actionable trigger for the next 1-5 sessions. "
+                "Name specific price levels, RSI levels, or news events to watch."
+            ),
+        },
+    }
+    base_required = ["verdict", "confidence", "summary", "analysis", "key_observations", "risks", "watch_for"]
+
+    if analysis_type != "exit":
+        base_properties.update({
+            "final_action": {
+                "type": "string",
+                "enum": ["AVOID", "WATCH", "WAIT FOR TRIGGER", "STARTER ONLY", "VALID ENTRY", "ADD", "HOLD", "TRIM", "EXIT"],
+                "description": (
+                    "Specific final action label. "
+                    "VALID ENTRY=rules pass and AI agrees cleanly. "
+                    "STARTER ONLY=rules pass but risk elevated (earnings close, weak confirmation). "
+                    "WAIT FOR TRIGGER=promising setup but confirmation missing. "
+                    "WATCH=rules mostly fail but early signs visible. "
+                    "AVOID=hard risk filters fail."
+                ),
+            },
+            "entry_trigger": {
+                "type": "string",
+                "description": (
+                    "Specific price level or technical condition that would confirm entry. "
+                    "Name exact price and volume condition. "
+                    "If insufficient data to determine, say 'Not available from current data.'"
+                ),
+            },
+            "invalidation_level": {
+                "type": "string",
+                "description": (
+                    "Price or condition that breaks the setup and invalidates the trade thesis. "
+                    "Name the support level or price. "
+                    "If insufficient data, say 'Not available from current data.'"
+                ),
+            },
+            "position_guidance": {
+                "type": "string",
+                "description": (
+                    "Position sizing and timing guidance. Examples: 'No entry yet.', "
+                    "'Starter position only (25-50% of normal size).', "
+                    "'Full position with normal risk.', "
+                    "'Reduce size — earnings within swing window.', "
+                    "'Avoid — distribution pressure elevated.'"
+                ),
+            },
+        })
+        base_required += ["final_action", "entry_trigger", "invalidation_level", "position_guidance"]
+
     return {
         "name": "trade_analysis",
         "description": (
@@ -468,55 +562,8 @@ def _build_tool_def(analysis_type: str) -> dict:
         ),
         "input_schema": {
             "type": "object",
-            "properties": {
-                "verdict": {
-                    "type": "string",
-                    "enum": verdict_enum,
-                    "description": verdict_desc,
-                },
-                "confidence": {
-                    "type": "string",
-                    "enum": ["high", "medium", "low"],
-                    "description": "Overall confidence given data quality and signal clarity.",
-                },
-                "summary": {
-                    "type": "string",
-                    "description": "One sentence headline summarising the setup and your verdict.",
-                },
-                "analysis": {
-                    "type": "string",
-                    "description": (
-                        "3-5 sentence holistic analysis. Connect the technical picture "
-                        "with market context, news catalyst, earnings risk, and insider activity. "
-                        "Explain what is driving your verdict beyond the mechanical rules."
-                    ),
-                },
-                "key_observations": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": (
-                        "4-6 specific, concrete observations — from ANY of the context blocks "
-                        "(news catalyst, insider signal, earnings proximity, market regime, "
-                        "price-action divergence, volume pattern). Not just technical observations."
-                    ),
-                },
-                "risks": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "3-5 key risks. Include earnings risk, news overhang, macro risk if relevant.",
-                },
-                "watch_for": {
-                    "type": "string",
-                    "description": (
-                        "Concrete, actionable trigger for the next 1-5 sessions. "
-                        "Name specific price levels, RSI levels, or news events to watch."
-                    ),
-                },
-            },
-            "required": [
-                "verdict", "confidence", "summary", "analysis",
-                "key_observations", "risks", "watch_for",
-            ],
+            "properties": base_properties,
+            "required": base_required,
         },
     }
 
@@ -567,6 +614,10 @@ def call_llm(prompt_data: dict, api_key: str, model: str, analysis_type: str = "
                 risks=inp.get("risks", []),
                 watch_for=inp.get("watch_for", ""),
                 model_used=model,
+                entry_trigger=inp.get("entry_trigger", ""),
+                invalidation_level=inp.get("invalidation_level", ""),
+                position_guidance=inp.get("position_guidance", ""),
+                final_action=inp.get("final_action", ""),
             )
 
     return LLMAnalysis(

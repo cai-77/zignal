@@ -940,6 +940,53 @@ elif page == "Analyze":
         if auto_ai and result.verdict in ("ENTER", "WAIT") and st.session_state.az_llm_key:
             _run_ai()
 
+    # ── Helper functions for Trade Decision Summary ───────────────────
+    def _compute_final_action_label(result, llm_result, analysis_type):
+        if analysis_type == "exit":
+            if llm_result and not getattr(llm_result, "error", None) and llm_result.final_action:
+                return llm_result.final_action
+            return {"ENTER": "HOLD", "WAIT": "TRIM", "REJECT": "EXIT"}.get(result.verdict, result.verdict)
+        if llm_result and not getattr(llm_result, "error", None) and llm_result.final_action:
+            return llm_result.final_action
+        if result.verdict == "REJECT":
+            return "AVOID"
+        if result.verdict == "ENTER":
+            return "VALID ENTRY"
+        rsi_c = next((c for c in result.conditions if "RSI" in c.name), None)
+        if rsi_c and not rsi_c.passed:
+            return "WATCH"
+        return "WAIT FOR TRIGGER"
+
+    def _setup_quality_label(result):
+        if result.verdict == "REJECT":
+            fails = [c.name for c in result.conditions if not c.passed]
+            return f"Blocked — {fails[0]}" if fails else "Blocked"
+        n = sum(1 for c in result.conditions if c.passed)
+        t = len(result.conditions)
+        if n == t:
+            return f"Complete ({n}/{t} conditions)"
+        quality = {3: "Good but incomplete", 2: "Partial", 1: "Weak", 0: "Very weak"}
+        return f"{quality.get(n, 'Partial')} ({n}/{t} conditions)"
+
+    def _compute_alignment(rule_verdict, ai_verdict, analysis_type="entry"):
+        if not ai_verdict:
+            return None
+        _pos = {"ENTER": "positive", "WAIT": "neutral", "REJECT": "negative", "CAUTION": "neutral"}
+        _exit_ai = {"HOLD": "positive", "TIGHTEN_STOP": "neutral", "EXIT_PARTIAL": "neutral", "EXIT": "negative"}
+        rp = _pos.get(rule_verdict, "neutral")
+        ap = (_exit_ai if analysis_type == "exit" else _pos).get(ai_verdict, "neutral")
+        if rp == ap:
+            return "Agree"
+        if rp == "positive" and ap == "neutral":
+            return "AI Downgraded Rule Result"
+        if rp == "positive" and ap == "negative":
+            return "Conflict / Needs Review"
+        if rp == "neutral" and ap == "positive":
+            return "AI Upgraded Watchlist Interest Only"
+        if rp == "negative" and ap == "positive":
+            return "Conflict / Needs Review"
+        return "Agree"
+
     # ── Display Layer 1 results (persisted in session state) ──────────
     if st.session_state.az_result is not None:
         result        = st.session_state.az_result
@@ -950,28 +997,128 @@ elif page == "Analyze":
         start_date    = st.session_state.az_start_date
         analysis_type = st.session_state.az_analysis_type
 
-        # ── Verdict badge ─────────────────────────────────────────────
-        _verdict_colors = {"ENTER": "#00c853", "WAIT": "#ff9800", "REJECT": "#f44336"}
-        # Exit mode remaps internal ENTER/WAIT/REJECT → HOLD/CAUTION/EXIT for display
-        _exit_label_map = {"ENTER": "HOLD", "WAIT": "CAUTION", "REJECT": "EXIT"}
-        _display_verdict = (
-            _exit_label_map.get(result.verdict, result.verdict)
-            if analysis_type == "exit" else result.verdict
+        # ── Trade Decision Summary ─────────────────────────────────────
+        _llm_now      = st.session_state.az_llm_result
+        _final_action = _compute_final_action_label(result, _llm_now, analysis_type)
+        _sq_label     = _setup_quality_label(result)
+        _alignment    = _compute_alignment(
+            result.verdict,
+            _llm_now.verdict if _llm_now and not _llm_now.error else None,
+            analysis_type,
         )
-        bg = _verdict_colors.get(result.verdict, "#888")
-        st.markdown(
-            f'<div style="background:{bg};color:white;padding:16px 24px;border-radius:10px;'
-            f'font-size:2rem;font-weight:700;letter-spacing:2px;display:inline-block;'
-            f'margin-bottom:8px;">{_display_verdict}</div>',
-            unsafe_allow_html=True,
-        )
-        st.markdown(f"**{result.verdict_reason}**")
-        st.markdown(f"*Analysis as of last bar: {str(df_full.index[-1])[:10]}*")
+        _exit_label_map   = {"ENTER": "HOLD", "WAIT": "CAUTION", "REJECT": "EXIT"}
+        _l1_display       = (_exit_label_map.get(result.verdict, result.verdict)
+                             if analysis_type == "exit" else result.verdict)
+        _l1_colors        = {"ENTER": "#00c853", "WAIT": "#ff9800", "REJECT": "#f44336"}
+        _l1_color         = _l1_colors.get(result.verdict, "#888")
+        _action_colors    = {
+            "AVOID": "#f44336", "WATCH": "#1976d2", "WAIT FOR TRIGGER": "#ff9800",
+            "STARTER ONLY": "#f59e0b", "VALID ENTRY": "#00c853", "ADD": "#00c853",
+            "HOLD": "#1976d2", "TRIM": "#ff9800", "EXIT": "#f44336",
+        }
+        _fa_color = _action_colors.get(_final_action, "#888")
+        _ai_colors = {
+            "ENTER": "#00c853", "WAIT": "#ff9800", "REJECT": "#f44336", "CAUTION": "#9c27b0",
+            "HOLD": "#1976d2", "EXIT": "#f44336", "EXIT_PARTIAL": "#ff9800", "TIGHTEN_STOP": "#9c27b0",
+        }
+        _align_colors = {
+            "Agree": "#00c853", "AI Downgraded Rule Result": "#ff9800",
+            "AI Upgraded Watchlist Interest Only": "#1976d2", "Conflict / Needs Review": "#f44336",
+        }
+
+        _PENDING = "<span style='color:#555;font-style:italic'>— run AI analysis to populate</span>"
+        if _llm_now and not _llm_now.error:
+            _ai_v     = _llm_now.verdict
+            _ai_color = _ai_colors.get(_ai_v, "#888")
+            _ai_cell  = f"<span style='color:{_ai_color};font-weight:600'>{_ai_v}</span>"
+            _al_cell  = (f"<span style='color:{_align_colors.get(_alignment, '#888')};font-weight:600'>"
+                         f"{_alignment}</span>") if _alignment else _PENDING
+            _trigger  = _llm_now.entry_trigger or "—"
+            _inval    = _llm_now.invalidation_level or "—"
+            _pos_g    = _llm_now.position_guidance or "—"
+            _key_risk = _llm_now.risks[0] if _llm_now.risks else "—"
+            _next_act = _llm_now.watch_for or "—"
+            _conf_str = _llm_now.confidence.title() if _llm_now.confidence else ""
+        else:
+            _ai_cell  = _PENDING
+            _al_cell  = _PENDING
+            _trigger  = "—"
+            _inval    = "—"
+            _pos_g    = "—"
+            _key_risk = "—"
+            _next_act = "—"
+            _conf_str = ""
+
+        _main_reason = result.verdict_reason.split('.')[0] + '.' if '.' in result.verdict_reason else result.verdict_reason
+
+        _trigger_cell  = _trigger  if _trigger  != "—" else _PENDING
+        _inval_cell    = _inval    if _inval    != "—" else _PENDING
+        _pos_g_cell    = _pos_g    if _pos_g    != "—" else _PENDING
+        _key_risk_cell = _key_risk if _key_risk != "—" else _PENDING
+        _next_act_cell = _next_act if _next_act != "—" else _PENDING
+        _conf_badge    = f'&nbsp;<span style="color:#4b5563;font-size:0.8rem">({_conf_str} confidence)</span>' if _conf_str else ""
+
+        st.markdown(f"""
+<div style="background:#111827;border:1px solid #1f2937;border-radius:12px;padding:20px 24px;margin-bottom:4px">
+  <div style="font-size:0.72rem;letter-spacing:3px;color:#6b7280;margin-bottom:14px;font-weight:600">TRADE DECISION SUMMARY &nbsp;·&nbsp; {str(df_full.index[-1])[:10]}</div>
+
+  <div style="display:flex;align-items:flex-start;gap:16px;margin-bottom:16px;flex-wrap:wrap">
+    <span style="background:{_fa_color};color:white;padding:8px 20px;border-radius:8px;font-size:1.25rem;font-weight:700;letter-spacing:2px;white-space:nowrap">{_final_action}</span>
+    <span style="color:#94a3b8;font-size:0.88rem;line-height:1.5;padding-top:6px">{_main_reason}</span>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px 24px;margin-bottom:14px">
+    <div>
+      <div style="color:#6b7280;font-size:0.72rem;letter-spacing:1px;margin-bottom:3px">RULE ENGINE</div>
+      <span style="color:{_l1_color};font-weight:600">{_l1_display}</span>
+      &nbsp;<span style="color:#4b5563;font-size:0.8rem">({_sq_label})</span>
+    </div>
+    <div>
+      <div style="color:#6b7280;font-size:0.72rem;letter-spacing:1px;margin-bottom:3px">AI CONTEXT</div>
+      {_ai_cell}{_conf_badge}
+    </div>
+    <div>
+      <div style="color:#6b7280;font-size:0.72rem;letter-spacing:1px;margin-bottom:3px">RULES / AI ALIGNMENT</div>
+      {_al_cell}
+    </div>
+  </div>
+
+  <hr style="border-color:#1f2937;margin:12px 0">
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px 24px;margin-bottom:12px">
+    <div>
+      <div style="color:#6b7280;font-size:0.72rem;letter-spacing:1px;margin-bottom:3px">ENTRY TRIGGER</div>
+      <span style="color:#e2e8f0;font-size:0.88rem">{_trigger_cell}</span>
+    </div>
+    <div>
+      <div style="color:#6b7280;font-size:0.72rem;letter-spacing:1px;margin-bottom:3px">INVALIDATION LEVEL</div>
+      <span style="color:#e2e8f0;font-size:0.88rem">{_inval_cell}</span>
+    </div>
+    <div>
+      <div style="color:#6b7280;font-size:0.72rem;letter-spacing:1px;margin-bottom:3px">POSITION GUIDANCE</div>
+      <span style="color:#e2e8f0;font-size:0.88rem">{_pos_g_cell}</span>
+    </div>
+    <div>
+      <div style="color:#6b7280;font-size:0.72rem;letter-spacing:1px;margin-bottom:3px">KEY RISK</div>
+      <span style="color:#e2e8f0;font-size:0.88rem">{_key_risk_cell}</span>
+    </div>
+  </div>
+
+  <div style="background:#0f172a;border-left:3px solid #7c3aed;border-radius:0 6px 6px 0;padding:10px 14px">
+    <div style="color:#6b7280;font-size:0.72rem;letter-spacing:1px;margin-bottom:3px">NEXT ACTION</div>
+    <span style="color:#c4b5fd;font-size:0.88rem">{_next_act_cell}</span>
+  </div>
+</div>
+<p style="color:#4b5563;font-size:0.75rem;margin:4px 0 12px 0">
+  Final Action is based on the rule engine result plus AI context and risk flags.
+  AI context may downgrade a passing setup but should not override hard risk controls.
+</p>
+""", unsafe_allow_html=True)
 
         st.divider()
 
         # ── Condition breakdown with ✅ / ❌ and info popovers ───────────
-        st.subheader("Exit Condition Breakdown" if analysis_type == "exit" else "Entry Condition Breakdown")
+        st.subheader("Layer 1 — Rule Engine" + (" (Exit)" if analysis_type == "exit" else " (Entry)"))
 
         _CONDITION_DOCS = {
             "RSI": (
@@ -1000,14 +1147,14 @@ elif page == "Analyze":
                 "will keep pace with down-day volume even as price drifts lower. This pattern "
                 "— price weak but buyers absorbing supply — precedes many strong breakouts."
             ),
-            "Institutional Dumping": (
-                "#### Institutional Dumping — Distribution Days\n\n"
+            "High-Volume Selling Pressure": (
+                "#### High-Volume Selling Pressure — Distribution Days\n\n"
                 "A **distribution day** is a session where price drops > 1% on volume "
                 "significantly above the average (default: 1.5× avg). Too many distribution "
                 "days in the lookback window (default: max 1) triggers a REJECT.\n\n"
-                "**Why it matters:** Distribution days reveal that large institutions are "
-                "actively selling (distributing) their shares. Entering while smart money is "
-                "exiting is a losing proposition regardless of other signals."
+                "**Why it matters:** Distribution days reveal that high-volume selling pressure "
+                "may indicate institutional distribution. Entering while this pressure persists "
+                "is a losing proposition regardless of other signals."
             ),
         }
 
@@ -1073,7 +1220,7 @@ elif page == "Analyze":
 
         # ── AI Analysis — shown immediately after conditions ──────────
         st.divider()
-        st.subheader("AI Analysis")
+        st.subheader("Layer 2 — AI Context Assessment")
 
         llm_key = st.session_state.az_llm_key
 
@@ -1235,6 +1382,18 @@ elif page == "Analyze":
                                 config={"displayModeBar": False},
                             )
 
+                        # Pre-compute Trade Decision Summary values for HTML report
+                        _sq_label_h       = _setup_quality_label(result)
+                        _final_action_h   = _compute_final_action_label(result, llm_result, analysis_type)
+                        _fa_color_h       = {
+                            "AVOID": "#f44336", "WATCH": "#1976d2", "WAIT FOR TRIGGER": "#ff9800",
+                            "STARTER ONLY": "#f59e0b", "VALID ENTRY": "#00c853", "ADD": "#00c853",
+                            "HOLD": "#1976d2", "TRIM": "#ff9800", "EXIT": "#f44336",
+                        }.get(_final_action_h, "#888")
+                        _alignment_h      = _compute_alignment(result.verdict, llm_result.verdict, analysis_type)
+                        _main_reason_h    = (result.verdict_reason.split('.')[0] + '.'
+                                             if '.' in result.verdict_reason else result.verdict_reason)
+
                         return f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <title>{symbol} — Trade Analysis Report</title>
@@ -1273,7 +1432,48 @@ elif page == "Analyze":
   Generated: {_generated}
 </p>
 
-<h2>Layer 1 — Rule Engine Verdict</h2>
+<div style="background:#f8f9fa;border:1px solid #dee2e6;border-radius:8px;padding:18px 22px;margin-bottom:24px">
+  <div style="font-size:0.72rem;letter-spacing:2px;color:#6c757d;font-weight:600;margin-bottom:12px">TRADE DECISION SUMMARY</div>
+  <div style="margin-bottom:12px">
+    <span style="background:{_fa_color_h};color:white;padding:6px 18px;border-radius:6px;font-size:1.1rem;font-weight:700;letter-spacing:2px">{_final_action_h}</span>
+    &nbsp;&nbsp;<span style="color:#6c757d;font-size:0.9rem">{_main_reason_h}</span>
+  </div>
+  <table style="width:100%;font-size:0.88rem;border-collapse:collapse;margin-bottom:12px">
+    <tr>
+      <td style="color:#6c757d;width:160px;padding:3px 0;font-size:0.75rem;letter-spacing:1px">RULE ENGINE</td>
+      <td style="font-weight:600;color:{_l1_verdict_color}">{_l1_display_label}</td>
+      <td style="color:#6c757d;width:160px;padding:3px 0 3px 24px;font-size:0.75rem;letter-spacing:1px">SETUP QUALITY</td>
+      <td>{_sq_label_h}</td>
+    </tr>
+    <tr>
+      <td style="color:#6c757d;font-size:0.75rem;letter-spacing:1px">AI CONTEXT</td>
+      <td style="font-weight:600;color:{_verdict_color}">{llm_result.verdict}</td>
+      <td style="color:#6c757d;padding-left:24px;font-size:0.75rem;letter-spacing:1px">ALIGNMENT</td>
+      <td>{_alignment_h or "—"}</td>
+    </tr>
+    <tr>
+      <td style="color:#6c757d;font-size:0.75rem;letter-spacing:1px">ENTRY TRIGGER</td>
+      <td colspan="3">{llm_result.entry_trigger or "—"}</td>
+    </tr>
+    <tr>
+      <td style="color:#6c757d;font-size:0.75rem;letter-spacing:1px">INVALIDATION</td>
+      <td colspan="3">{llm_result.invalidation_level or "—"}</td>
+    </tr>
+    <tr>
+      <td style="color:#6c757d;font-size:0.75rem;letter-spacing:1px">POSITION GUIDANCE</td>
+      <td colspan="3">{llm_result.position_guidance or "—"}</td>
+    </tr>
+    <tr>
+      <td style="color:#6c757d;font-size:0.75rem;letter-spacing:1px">KEY RISK</td>
+      <td colspan="3">{llm_result.risks[0] if llm_result.risks else "—"}</td>
+    </tr>
+  </table>
+  <div style="background:#fff3cd;border-left:3px solid #ffc107;padding:8px 12px;border-radius:0 4px 4px 0;font-size:0.88rem">
+    <b>Next Action:</b> {llm_result.watch_for or "—"}
+  </div>
+</div>
+
+<h2>Layer 1 — Rule Engine</h2>
 <span class="verdict" style="background:{_l1_verdict_color}">{_l1_display_label}</span>
 <p style="margin-top:10px">{result.verdict_reason}</p>
 <table>
@@ -1281,7 +1481,7 @@ elif page == "Analyze":
   {_l1_rows}
 </table>
 
-<h2>Layer 2 — AI Analysis Verdict</h2>
+<h2>Layer 2 — AI Context Assessment</h2>
 <span class="verdict" style="background:{_verdict_color}">{llm_result.verdict}</span>
 &nbsp;&nbsp;<b>Confidence:</b> {llm_result.confidence} {conf_dots}
 <div class="summary">{llm_result.summary}</div>

@@ -267,14 +267,14 @@ def analyze(df: pd.DataFrame, symbol: str, vrs_cfg: dict) -> AnalysisResult:
         if vol_ratio >= dry_up_ratio:
             vol_passed = True
             vol_detail = (
-                f"Buyers active: up-day avg vol = {vol_ratio:.0%} of down-day avg vol "
-                f"(threshold ≥ {dry_up_ratio:.0%}) — accumulation confirmed"
+                f"Buyers active: up-day avg vol = {vol_ratio:.1%} of down-day avg vol "
+                f"(threshold ≥ {dry_up_ratio:.1%}) — accumulation confirmed"
             )
         else:
             vol_passed = False
             vol_detail = (
-                f"Sellers dominant: up-day avg vol = {vol_ratio:.0%} of down-day avg vol "
-                f"(below {dry_up_ratio:.0%} threshold) — no accumulation yet"
+                f"Sellers dominant: up-day avg vol = {vol_ratio:.1%} of down-day avg vol "
+                f"(below {dry_up_ratio:.1%} threshold) — no accumulation yet"
             )
 
     result.conditions.append(Condition(
@@ -307,14 +307,14 @@ def analyze(df: pd.DataFrame, symbol: str, vrs_cfg: dict) -> AnalysisResult:
         f"Criteria: volume > {dist_vol_ratio}x avg AND price drops > {dist_price_drop:.1%}"
     )
     result.conditions.append(Condition(
-        "Institutional Dumping — Distribution Days", dist_passed, dist_detail, dist_days,
+        "High-Volume Selling Pressure — Distribution Days", dist_passed, dist_detail, dist_days,
     ))
 
     # ── Verdict ───────────────────────────────────────────────────────
     if not dist_passed:
         result.verdict = "REJECT"
         result.verdict_reason = (
-            f"Institutional dumping detected — {dist_days} distribution day(s) "
+            f"Distribution pressure detected — {dist_days} distribution day(s) "
             f"in last {dist_lookback} bars (limit: {max_dist_days})"
         )
     elif not sma_passed:
@@ -353,7 +353,7 @@ def analyze(df: pd.DataFrame, symbol: str, vrs_cfg: dict) -> AnalysisResult:
         result.verdict = "WAIT"
         result.verdict_reason = (
             f"RSI and SMA conditions met but volume accumulation not confirmed "
-            f"(up-day vol = {vol_ratio:.0%} of down-day vol, need ≥ {dry_up_ratio:.0%}). "
+            f"(up-day vol = {vol_ratio:.1%} of down-day vol, need ≥ {dry_up_ratio:.1%}). "
             f"Sellers still have the edge — wait for buyers to step in"
         )
     else:
@@ -542,7 +542,7 @@ def analyze_exit(
             f"{dist_days} distribution day(s) in last {dist_lookback} bars "
             f"(threshold >{max_dist_days}). No abnormal institutional selling."
         )
-    result.conditions.append(Condition("Distribution Days — Institutional Selling", dist_passed, dist_detail, dist_days))
+    result.conditions.append(Condition("High-Volume Selling Pressure — Distribution Days", dist_passed, dist_detail, dist_days))
 
     # ── Exit verdict ──────────────────────────────────────────────────
     if exit_signals >= 2 or (cost_basis and price < cost_basis * (1 - stop_loss_pct)):
