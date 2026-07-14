@@ -5,7 +5,7 @@ Fetches daily OHLCV from Polygon and runs the VolumeRsiSwing entry conditions
 against the last bar in the requested window.  Returns a structured verdict:
   ENTER  — all conditions satisfied, entry setup confirmed
   WAIT   — setup incomplete but not broken (RSI approaching, accumulation pending)
-  REJECT — hard blocker present (freefall, overbought, institutional dumping)
+  REJECT — hard blocker present (freefall, overbought, high-volume selling pressure)
 """
 
 import sys
@@ -327,7 +327,7 @@ def analyze(df: pd.DataFrame, symbol: str, vrs_cfg: dict) -> AnalysisResult:
         vol_ratio if vol_ratio != float("inf") else None,
     ))
 
-    # ── Condition 4: Distribution days (institutional dumping) ─────────
+    # ── Condition 4: Distribution days (high-volume selling pressure) ───
     recent_dist = df.iloc[-dist_lookback:]
     avg_vol     = float(volumes.iloc[-vol_avg_period:].mean())
     vol_thresh  = avg_vol * dist_vol_ratio if avg_vol > 0 else float("inf")

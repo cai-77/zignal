@@ -20,6 +20,63 @@ import pandas as pd
 
 
 # ──────────────────────────────────────────────────────────────────────
+# SEC Form 4 transaction code descriptions
+# ──────────────────────────────────────────────────────────────────────
+
+_TX_CODE_MEANINGS = {
+    "P": "open-market purchase",
+    "S": "open-market sale",
+    "A": "grant or award (not a market transaction)",
+    "D": "disposition (not necessarily an open-market sale)",
+    "F": "tax withholding / payment of exercise price",
+    "G": "gift",
+    "M": "exercise of derivative security",
+    "X": "exercise of in-the-money or at-the-money derivative",
+    "J": "other transaction",
+    "Z": "deposit or withdrawal from trust",
+}
+
+
+def _tag_news_relevance(headline: str, summary: str = "") -> str:
+    """Classify a news article by relevance type using keyword matching."""
+    text = (headline + " " + (summary or "")).lower()
+    if any(k in text for k in [
+        "earnings", " eps ", "revenue", "guidance", "quarterly results",
+        "fiscal year", "q1 ", "q2 ", "q3 ", "q4 ", "annual results", "beat", "miss",
+    ]):
+        return "earnings/fundamentals"
+    if any(k in text for k in [
+        "analyst", "upgrade", "downgrade", "price target", " pt ", "overweight",
+        "underweight", "outperform", "underperform", "buy rating", "sell rating",
+        "neutral rating", "initiat",
+    ]):
+        return "analyst/rating"
+    if any(k in text for k in [
+        "lawsuit", " sec ", "antitrust", "regulat", "fine ", "penalty",
+        "investigation", "subpoena", "doj ", " ftc ", "legal action", "settlement",
+    ]):
+        return "legal/regulatory"
+    if any(k in text for k in [
+        "artificial intelligence", " ai ", "machine learning", "data center",
+        "cloud computing", "semiconductor", "nvidia", "openai", "chatgpt",
+        "generative ai", "large language",
+    ]):
+        return "AI infrastructure"
+    if any(k in text for k in [
+        "federal reserve", "fed rate", "interest rate", "inflation", " gdp",
+        "recession", "sector ", "s&p 500", "nasdaq", "dow jones",
+        "market selloff", "broad market", "macro", "geopolit", "tariff",
+    ]):
+        return "sector/macro"
+    if any(k in text for k in [
+        "acqui", "merger", "deal ", "launch", "partnership", "product",
+        "ceo ", "executive", "appoint", "hire ", "layoff", "restructur",
+    ]):
+        return "company-specific"
+    return "low relevance"
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Result type
 # ──────────────────────────────────────────────────────────────────────
 
@@ -132,11 +189,12 @@ def fetch_news_context(symbol: str, finnhub_key: str, days: int = 14, start_date
             except Exception:
                 article_date = ""
             results.append({
-                "date": article_date,
-                "headline": headline,
-                "summary": summary,
-                "source": a.get("source", ""),
-                "url": a.get("url", ""),
+                "date":      article_date,
+                "headline":  headline,
+                "summary":   summary,
+                "source":    a.get("source", ""),
+                "url":       a.get("url", ""),
+                "relevance": _tag_news_relevance(headline, summary),
             })
         return results
     except Exception:
@@ -342,26 +400,37 @@ def build_prompt(
             "  • Are there divergences or support/resistance levels visible in the data?\n\n"
             "Be direct and actionable. The trader decides — your analysis sharpens conviction "
             "or raises the right flags.\n\n"
-            "Report quality rules — follow strictly:\n"
-            "1. RSI wording: Always distinguish (a) 1-day RSI change from (b) 3-bar RSI trend. "
-            "   Never say 'RSI is curling up' or 'momentum confirmed' if the rule engine marked "
-            "   the RSI curl condition as FAIL. If RSI is up day-over-day but the 3-bar trend is "
-            "   down, state both explicitly.\n"
-            "2. Language: Do not use 'sellers exhausted', 'buyers in control', 'classic bottom', "
-            "   'this is a bottom', or 'institutional dumping'. Use instead: "
-            "   'momentum confirmation incomplete', 'possible capitulation-style low', "
-            "   'distribution pressure', 'buyer participation improving but not confirmed', "
-            "   'high-volume selling pressure'.\n"
-            "3. Insider transactions: Only code 'P' (open-market purchase) is a bullish insider signal. "
-            "   Grants, awards, option exercises, tax withholding are not signals. Do not call a "
-            "   non-open-market transaction bullish. If type is unclear, say so.\n"
-            "4. Earnings: Note whether the date is confirmed or estimated. Do not state an estimated "
-            "   date as a hard fact.\n"
-            "5. News claims: When you say a selloff is macro/sector-driven rather than company-specific, "
-            "   reference specific headlines from the provided news data to support that claim. "
-            "   If the news does not clearly support it, soften the statement.\n"
-            "6. Internal consistency: Your analysis and key_observations must use the same RSI values "
-            "   and price levels shown in the rule engine results. Do not introduce different numbers."
+            "REPORT QUALITY RULES — FOLLOW STRICTLY:\n\n"
+            "1. RSI wording: Distinguish 1-day RSI change from 3-bar trend. "
+            "   Never say 'curling up' or 'momentum confirmed' if the RSI curl condition is FAIL. "
+            "   If RSI is up day-over-day but 3-bar trend is down, state both explicitly.\n\n"
+            "2. Banned language — do NOT use any of the following:\n"
+            "   • 'institutional dumping' → say 'high-volume selling pressure' or 'distribution pressure'\n"
+            "   • 'sellers exhausted' or 'seller exhaustion' → say 'possible capitulation-style low'\n"
+            "   • 'buyers in control' or 'buyers are now in control' → say 'buyer participation improving'\n"
+            "   • 'classic bottom' or 'textbook bottom' or 'this is a bottom' → say 'constructive oversold-recovery setup'\n"
+            "   • 'confirming the reversal' → say 'consistent with the reversal thesis'\n"
+            "   • 'textbook oversold reversal' → say 'constructive oversold-recovery setup'\n"
+            "   • 'classic seller exhaustion' → say 'possible capitulation-style low'\n\n"
+            "3. Insider signals: The data section above is already split into VERIFIED signals and "
+            "   NON-MARKET transactions. If the section header says '⛔ NO VERIFIED OPEN-MARKET "
+            "   TRANSACTIONS', do NOT mention any insider transaction as bullish evidence. "
+            "   Use exactly: 'Reported insider transaction data exists but does not include a "
+            "   verified open-market purchase — it is not used as a market signal.' "
+            "   Only code P (open-market purchase) or S (open-market sale) are signals.\n\n"
+            "4. Earnings: Always label the earnings date as ESTIMATED unless the data section "
+            "   explicitly says CONFIRMED. Say 'estimated earnings date: [date]', not 'earnings on [date]'.\n\n"
+            "5. News sourcing: To claim a selloff is macro/sector-driven, you must cite a specific "
+            "   headline tagged [SECTOR/MACRO] from the news section. If no such article exists, "
+            "   say 'available news does not clearly identify a macro/sector catalyst.' "
+            "   Do not use [LOW RELEVANCE] articles as evidence for any claim.\n\n"
+            "6. STARTER ONLY — timing clarity: When final_action is STARTER ONLY, position_guidance "
+            "   MUST explicitly state ONE of:\n"
+            "   (a) 'Starter position allowed now — [reason current conditions qualify].'\n"
+            "   (b) 'No entry yet — starter only after [specific trigger, e.g. close above $X].'\n"
+            "   Never use STARTER ONLY without making clear whether action is immediate or conditional.\n\n"
+            "7. Internal consistency: analysis and key_observations must use the exact RSI values "
+            "   and price levels from the rule engine results. Do not introduce different numbers."
         )
 
     # ── User message — assemble sections ──────────────────────────────
@@ -410,36 +479,68 @@ def build_prompt(
     else:
         parts.append(_section("EARNINGS RISK", "No earnings date found in next 6 months (or data unavailable)"))
 
-    # Recent news
+    # Recent news — split by relevance so LLM knows which support macro claims
     if news_ctx:
+        high_rel = [n for n in news_ctx if n.get("relevance", "") != "low relevance"]
+        low_rel  = [n for n in news_ctx if n.get("relevance", "") == "low relevance"]
         news_lines = []
-        for n in news_ctx:
-            news_lines.append(f"[{n['date']}] {n['headline']}  — {n['source']}")
+        for n in high_rel:
+            tag = n.get("relevance", "unknown").upper()
+            news_lines.append(f"[{n['date']}] [{tag}] {n['headline']}  — {n['source']}")
             if n.get("summary"):
                 news_lines.append(f"  {n['summary']}")
-        parts.append(_section("RECENT NEWS (last 14 days)", "\n".join(news_lines)))
+        if low_rel:
+            news_lines.append("\n--- Low-relevance articles (list only; do not use to support macro/sector claims) ---")
+            for n in low_rel:
+                news_lines.append(f"[{n['date']}] [LOW RELEVANCE] {n['headline']}  — {n['source']}")
+        news_lines.append(
+            "\n⚠ News usage rules: Only cite articles tagged SECTOR/MACRO or AI INFRASTRUCTURE "
+            "to support broad-market or sector-driven claims. Do not cite LOW RELEVANCE articles "
+            "as evidence. If no SECTOR/MACRO articles exist, soften any macro-driven claim."
+        )
+        parts.append(_section("RECENT NEWS (last 14 days — with relevance tags)", "\n".join(news_lines)))
     else:
         parts.append(_section("RECENT NEWS (last 14 days)", "No recent news found"))
 
-    # Insider transactions
+    # Insider transactions — verified signals separated from non-signal transactions
     if insider_ctx:
-        insider_lines = []
-        for t in insider_ctx:
-            val_str    = f"  (${t['value_usd']:,.0f})" if t.get("value_usd") else ""
-            price_str  = f" @ ${t['price']:.2f}" if t.get("price") else ""
-            code_str   = f"  [SEC code: {t['transaction_code']}]" if t.get("transaction_code") else ""
-            signal_str = "" if t.get("is_market_signal") else "  ⚠ not an open-market transaction"
+        signal_txns     = [t for t in insider_ctx if t.get("is_market_signal")]
+        non_signal_txns = [t for t in insider_ctx if not t.get("is_market_signal")]
+        insider_lines   = []
+
+        if signal_txns:
+            insider_lines.append("VERIFIED OPEN-MARKET TRANSACTIONS (SEC code P or S — may be used as signals):")
+            for t in signal_txns:
+                val_str   = f"  (${t['value_usd']:,.0f})" if t.get("value_usd") else ""
+                price_str = f" @ ${t['price']:.2f}" if t.get("price") else ""
+                insider_lines.append(
+                    f"  ✓ [{t['date']}] {t['name']} — {t['action']} "
+                    f"{t['shares']:,} shares{price_str}{val_str}  "
+                    f"(filed: {t.get('filing_date','n/a')}, code: {t.get('transaction_code','')})"
+                )
+        else:
             insider_lines.append(
-                f"[{t['date']}] {t['name']} — {t['action']}  "
-                f"{t['shares']:,} shares{price_str}{val_str}"
-                f"  (filed: {t.get('filing_date', 'n/a')}){code_str}{signal_str}"
+                "⛔ NO VERIFIED OPEN-MARKET TRANSACTIONS IN THIS PERIOD.\n"
+                "   None of the transactions below are open-market purchases or sales.\n"
+                "   DO NOT use any transaction below as bullish or bearish evidence.\n"
+                "   Required wording if you mention insiders: "
+                "   'Reported insider transaction data exists but does not include a "
+                "   verified open-market purchase — it is not used as a market signal.'"
             )
-        insider_lines.append(
-            "\nIMPORTANT: Only SEC code 'P' (open-market purchase) or 'S' (open-market sale) are "
-            "directional signals. Grants (A), option exercises (M/X), tax withholding (F), and "
-            "gifts (G) are administrative transactions — do NOT treat them as bullish or bearish signals. "
-            "If transaction type is unclear, say so explicitly rather than implying directional intent."
-        )
+
+        if non_signal_txns:
+            insider_lines.append("\nNON-MARKET TRANSACTIONS — DO NOT TREAT AS DIRECTIONAL SIGNALS:")
+            for t in non_signal_txns:
+                val_str   = f"  (${t['value_usd']:,.0f})" if t.get("value_usd") else ""
+                price_str = f" @ ${t['price']:.2f}" if t.get("price") else ""
+                code      = t.get("transaction_code", "?")
+                meaning   = _TX_CODE_MEANINGS.get(code, "non-open-market transaction")
+                insider_lines.append(
+                    f"  ✗ [{t['date']}] {t['name']} — {t['action']} "
+                    f"{t['shares']:,} shares{price_str}{val_str}  "
+                    f"(code: {code} = {meaning}; filed: {t.get('filing_date','n/a')})"
+                )
+
         parts.append(_section("INSIDER TRANSACTIONS (last 90 days — Finnhub / SEC Form 4)", "\n".join(insider_lines)))
     else:
         parts.append(_section("INSIDER TRANSACTIONS (last 90 days)", "No recent insider transactions found"))
@@ -578,11 +679,12 @@ def _build_tool_def(analysis_type: str) -> dict:
                 "enum": ["AVOID", "WATCH", "WAIT FOR TRIGGER", "STARTER ONLY", "VALID ENTRY", "ADD", "HOLD", "TRIM", "EXIT"],
                 "description": (
                     "Specific final action label. "
-                    "VALID ENTRY=rules pass and AI agrees cleanly. "
-                    "STARTER ONLY=rules pass but risk elevated (earnings close, weak confirmation). "
-                    "WAIT FOR TRIGGER=promising setup but confirmation missing. "
-                    "WATCH=rules mostly fail but early signs visible. "
-                    "AVOID=hard risk filters fail."
+                    "VALID ENTRY = rules pass and AI agrees, act now at current price. "
+                    "STARTER ONLY = rules pass but risk elevated — MUST pair with position_guidance "
+                    "stating clearly whether the starter is allowed NOW or only after a named trigger. "
+                    "WAIT FOR TRIGGER = promising but confirmation missing — name the trigger in position_guidance. "
+                    "WATCH = rules mostly fail but early signs visible, monitor only. "
+                    "AVOID = hard risk filters fail, stay out."
                 ),
             },
             "entry_trigger": {
@@ -604,10 +706,14 @@ def _build_tool_def(analysis_type: str) -> dict:
             "position_guidance": {
                 "type": "string",
                 "description": (
-                    "Position sizing and timing guidance. Examples: 'No entry yet.', "
-                    "'Starter position only (25-50% of normal size).', "
-                    "'Full position with normal risk.', "
-                    "'Reduce size — earnings within swing window.', "
+                    "Position sizing AND timing — must be unambiguous. "
+                    "If final_action is STARTER ONLY, you MUST state explicitly whether entry is "
+                    "allowed NOW or only after a specific trigger: "
+                    "e.g. 'Starter position (25% size) allowed now — RSI curl forming at current price.' "
+                    "OR 'No entry yet — starter only after close above $X on above-average volume.' "
+                    "If final_action is WAIT FOR TRIGGER, name the exact trigger price or condition. "
+                    "Other examples: 'No entry.', 'Full position with normal risk.', "
+                    "'Reduce size — estimated earnings within swing window.', "
                     "'Avoid — distribution pressure elevated.'"
                 ),
             },

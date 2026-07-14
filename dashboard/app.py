@@ -1065,6 +1065,24 @@ elif page == "Analyze":
             "AI Upgraded Watchlist Interest Only": "#1976d2", "Conflict / Needs Review": "#f44336",
         }
 
+        # Pull earnings metadata from ctx (available only after AI run)
+        _cw_meta_pre  = st.session_state.get("az_llm_ctx_meta") or {}
+        _earn_meta    = _cw_meta_pre.get("earnings") or {}
+        _earn_cell    = ""
+        if _earn_meta and _earn_meta.get("date"):
+            try:
+                import datetime as _dt3
+                _earn_days = (_dt3.date.fromisoformat(_earn_meta["date"]) - _dt3.date.today()).days
+            except Exception:
+                _earn_days = _earn_meta.get("days_away", "?")
+            _earn_conf  = _earn_meta.get("confidence", "estimated").title()
+            _earn_color = "#f44336" if isinstance(_earn_days, int) and _earn_days <= 21 else "#f59e0b"
+            _earn_cell  = (
+                f'<span style="color:{_earn_color};font-weight:600">'
+                f'{_earn_conf} earnings: {_earn_meta["date"]}</span>'
+                f'&nbsp;<span style="color:#6b7280;font-size:0.8rem">({_earn_days}d away)</span>'
+            )
+
         _PENDING = "<span style='color:#555;font-style:italic'>— run AI analysis to populate</span>"
         if _llm_now and not _llm_now.error:
             _ai_v     = _llm_now.verdict
@@ -1150,6 +1168,7 @@ elif page == "Analyze":
       <div style="color:#6b7280;font-size:0.72rem;letter-spacing:1px;margin-bottom:3px">RULES / AI ALIGNMENT</div>
       {_al_cell}
     </div>
+    {(f'<div><div style="color:#6b7280;font-size:0.72rem;letter-spacing:1px;margin-bottom:3px">EARNINGS</div>{_earn_cell}</div>') if _earn_cell else ""}
   </div>
 
   {_data_gap_html}
@@ -1387,7 +1406,9 @@ elif page == "Analyze":
                         _news_h = meta.get("news_articles", [])
                         if _news_h:
                             _news_li = "".join(
-                                f"<li>[{a['date']}] <b>{a.get('source','')}</b>: {a['headline']}"
+                                f"<li>[{a['date']}] <b>{a.get('source','')}</b>"
+                                + (f" <em>[{a.get('relevance','')}]</em>" if a.get("relevance") else "")
+                                + f": {a['headline']}"
                                 + (f' <a href="{a["url"]}">[link]</a>' if a.get("url") else "")
                                 + "</li>"
                                 for a in _news_h
@@ -1682,7 +1703,9 @@ elif page == "Analyze":
                         st.markdown(f"**News ({len(articles)} articles, Finnhub):**")
                         for _art in articles:
                             _url_part = f" — [{_art['source']}]({_art['url']})" if _art.get("url") else f" — {_art.get('source','')}"
-                            st.markdown(f"- [{_art['date']}] {_art['headline']}{_url_part}")
+                            _rel_tag  = _art.get("relevance", "")
+                            _rel_str  = f" `{_rel_tag}`" if _rel_tag else ""
+                            st.markdown(f"- [{_art['date']}]{_rel_str} {_art['headline']}{_url_part}")
                     insiders = meta.get("insider_transactions", [])
                     if insiders:
                         st.markdown(f"**Insider transactions ({len(insiders)}, Finnhub / SEC Form 4):**")
