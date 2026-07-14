@@ -735,72 +735,6 @@ def _build_tool_def(analysis_type: str) -> dict:
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Output guardrails — post-process LLM text to enforce preferred phrasing
-# ──────────────────────────────────────────────────────────────────────
-
-import re as _re
-
-# (regex pattern, replacement) pairs applied case-insensitively to all text fields.
-# Replacements use preferred phrasing; the LLM prompt is kept as guidance only —
-# these rules are the hard enforcement layer.
-_PHRASE_GUARDRAILS: list[tuple[str, str]] = [
-    # "institutional dumping" variants
-    (r"\binstitutional\s+dumping\b",                    "high-volume selling pressure"),
-    (r"\bdumping\s+(?:by\s+)?institutions?\b",          "high-volume selling pressure"),
-
-    # seller-exhaustion variants
-    (r"\bclassic\s+seller\s+exhaustion\b",              "possible capitulation-style low"),
-    (r"\bseller\s+exhaustion\b",                        "possible capitulation-style low"),
-    (r"\bsellers?\s+(?:are\s+(?:now\s+)?)?exhausted\b", "a possible capitulation-style low may be forming"),
-    (r"\bsellers?\s+(?:still\s+)?not\s+exhausted\b",   "momentum confirmation is incomplete"),
-    (r"\bsellers?\s+(?:still\s+)?have\s+the\s+edge\b", "buyer participation not yet confirmed"),
-
-    # buyers-in-control variants
-    (r"\bbuyers?\s+(?:are\s+(?:now\s+)?)?in\s+control\b", "buyer participation is improving"),
-    (r"\bbuying\s+pressure\s+(?:is\s+)?(?:now\s+)?in\s+control\b", "buyer participation is improving"),
-
-    # overconfident reversal / bottom language
-    (r"\btextbook\s+oversold\s+reversal\b",             "constructive oversold-recovery setup"),
-    (r"\btextbook\s+reversal\b",                        "constructive oversold-recovery setup"),
-    (r"\bclassic\s+oversold\s+reversal\b",              "constructive oversold-recovery setup"),
-    (r"\bclassic\s+reversal\b",                         "constructive oversold-recovery setup"),
-    (r"\bconfirm(?:s|ing|ed)\s+the\s+reversal\s+thesis\b", "is consistent with the reversal thesis"),
-    (r"\bconfirm(?:s|ing|ed)\s+the\s+reversal\b",       "is consistent with the reversal thesis"),
-    (r"\bconfirm(?:s|ing|ed)\s+(?:a\s+)?reversal\b",   "is consistent with a reversal"),
-    (r"\bconfirm(?:s|ing|ed)\s+(?:a\s+)?bottom\b",     "is consistent with a possible low"),
-    (r"\bthis\s+is\s+(?:the\s+|a\s+)?bottom\b",        "this may represent a constructive oversold-recovery setup"),
-]
-
-
-def _apply_text_guardrails(text: str) -> str:
-    """Apply all phrase guardrails to a single string, preserving start-of-sentence capitalisation."""
-    if not text:
-        return text
-    for pattern, replacement in _PHRASE_GUARDRAILS:
-        def _replace(m: "_re.Match") -> str:
-            original = m.group(0)
-            # Preserve leading capital if the matched phrase starts a sentence
-            if original and original[0].isupper():
-                return replacement[0].upper() + replacement[1:]
-            return replacement
-        text = _re.sub(pattern, _replace, text, flags=_re.IGNORECASE)
-    return text
-
-
-def _apply_output_guardrails(result: LLMAnalysis) -> LLMAnalysis:
-    """Scrub all free-text fields of an LLMAnalysis result in-place."""
-    result.summary           = _apply_text_guardrails(result.summary)
-    result.analysis          = _apply_text_guardrails(result.analysis)
-    result.watch_for         = _apply_text_guardrails(result.watch_for)
-    result.entry_trigger     = _apply_text_guardrails(result.entry_trigger)
-    result.invalidation_level = _apply_text_guardrails(result.invalidation_level)
-    result.position_guidance = _apply_text_guardrails(result.position_guidance)
-    result.key_observations  = [_apply_text_guardrails(o) for o in result.key_observations]
-    result.risks             = [_apply_text_guardrails(r) for r in result.risks]
-    return result
-
-
-# ──────────────────────────────────────────────────────────────────────
 # LLM call
 # ──────────────────────────────────────────────────────────────────────
 
@@ -837,7 +771,7 @@ def call_llm(prompt_data: dict, api_key: str, model: str, analysis_type: str = "
     for block in response.content:
         if getattr(block, "type", None) == "tool_use" and block.name == "trade_analysis":
             inp = block.input
-            raw = LLMAnalysis(
+            return LLMAnalysis(
                 verdict=inp.get("verdict", ""),
                 confidence=inp.get("confidence", ""),
                 summary=inp.get("summary", ""),
@@ -851,7 +785,6 @@ def call_llm(prompt_data: dict, api_key: str, model: str, analysis_type: str = "
                 position_guidance=inp.get("position_guidance", ""),
                 final_action=inp.get("final_action", ""),
             )
-            return _apply_output_guardrails(raw)
 
     return LLMAnalysis(
         error="LLM response did not include a structured trade_analysis call.",
