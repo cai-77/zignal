@@ -214,19 +214,25 @@ def analyze(df: pd.DataFrame, symbol: str, vrs_cfg: dict) -> AnalysisResult:
 
     rsi_passed = touched_oversold and curling
 
-    # ── Condition 1: RSI oversold + curling up ────────────────────────
+    # ── Condition 1: RSI pullback threshold + curling up ─────────────
     if touched_oversold:
-        ep_label = {1: "single dip", 2: "double-bottom"}.get(episodes, f"{episodes} oversold touches")
+        ep_label = {1: "single dip", 2: "double-bottom"}.get(episodes, f"{episodes} threshold touches")
         oversold_sub = (
             f"PASS — RSI dipped to {rsi_min_val:.1f} ({bars_ago} bar{'s' if bars_ago != 1 else ''} ago), "
             f"recovered +{recovery:.1f} pts to {rsi_now:.1f} now  [{ep_label} in last {rsi_lookback_bars} bars]"
         )
     else:
         gap = rsi_min_val - rsi_oversold
-        oversold_sub = (
-            f"FAIL — lowest RSI in last {rsi_lookback_bars} bars was {rsi_min_val:.1f}, "
-            f"needs to drop below {rsi_oversold:.0f} (missed by {gap:.1f} pts)"
-        )
+        if gap <= 0.5:
+            oversold_sub = (
+                f"NEAR MISS — RSI low was {rsi_min_val:.1f} vs threshold {rsi_oversold:.1f} "
+                f"({gap:.1f} pts short). Does not pass the rule"
+            )
+        else:
+            oversold_sub = (
+                f"FAIL — lowest RSI in last {rsi_lookback_bars} bars was {rsi_min_val:.1f}, "
+                f"needs to drop below {rsi_oversold:.0f} (missed by {gap:.1f} pts)"
+            )
 
     curling_sub = (
         f"PASS — curling up ({rsi_3ago:.1f} → {rsi_now:.1f} over 3 bars)"
@@ -234,12 +240,22 @@ def analyze(df: pd.DataFrame, symbol: str, vrs_cfg: dict) -> AnalysisResult:
         else f"FAIL — still falling ({rsi_3ago:.1f} → {rsi_now:.1f} over 3 bars) — wait for RSI to tick higher"
     )
 
-    rsi_detail = f"Oversold touch: {oversold_sub}  |  Curling: {curling_sub}"
-    result.conditions.append(Condition("RSI — Oversold & Curling Up", rsi_passed, rsi_detail, rsi_now))
+    if not rsi_passed:
+        if touched_oversold and not curling:
+            _rsi_summary = "Threshold touched but RSI curl not yet confirmed (both required). "
+        elif not touched_oversold and curling:
+            _rsi_summary = "RSI curling up but threshold not yet touched (both required). "
+        else:
+            _rsi_summary = "Neither sub-condition met. "
+    else:
+        _rsi_summary = ""
+    rsi_detail = f"{_rsi_summary}[1] Threshold touch: {oversold_sub}  |  [2] Curling: {curling_sub}"
+    result.conditions.append(Condition("RSI — Pullback Threshold & Curling Up", rsi_passed, rsi_detail, rsi_now))
 
-    # ── Condition 2: SMA flattening / not in freefall ─────────────────
+    # ── Condition 2: SMA flattening / not in severe decline ───────────
     n    = sma_slope_n
     need = sma_period + 2 * n
+    _sma_is_freefall = False  # set True only for large accelerating declines
     if len(sma.dropna()) < need:
         sma_passed = False
         sma_detail = f"Insufficient bars for SMA{sma_period} slope comparison"
@@ -269,11 +285,20 @@ def analyze(df: pd.DataFrame, symbol: str, vrs_cfg: dict) -> AnalysisResult:
                 )
             else:
                 sma_passed = False
-                sma_detail = (
-                    f"FAIL — SMA{sma_period} accelerating downward "
-                    f"({prior_pct:+.2f}% → {recent_pct:+.2f}% per bar) "
-                    f"AND price still falling ({price_3bar_chg:+.2f}% over last 3 bars) — true freefall"
-                )
+                # Classify severity: steep SMA drop + price still falling hard = freefall
+                _sma_is_freefall = recent_pct < -0.05 or price_3bar_chg < -5.0
+                if _sma_is_freefall:
+                    sma_detail = (
+                        f"FAIL — SMA{sma_period} accelerating sharply downward "
+                        f"({prior_pct:+.2f}% → {recent_pct:+.2f}% per bar) "
+                        f"with price also falling ({price_3bar_chg:+.2f}% over last 3 bars)"
+                    )
+                else:
+                    sma_detail = (
+                        f"FAIL — SMA{sma_period} still declining, not yet flattening "
+                        f"({prior_pct:+.2f}% → {recent_pct:+.2f}% per bar, "
+                        f"price {price_3bar_chg:+.2f}% over last 3 bars)"
+                    )
         elif prior_slope >= 0:
             sma_passed = True
             sma_detail = (
@@ -364,9 +389,16 @@ def analyze(df: pd.DataFrame, symbol: str, vrs_cfg: dict) -> AnalysisResult:
         )
     elif not sma_passed:
         result.verdict = "REJECT"
-        result.verdict_reason = (
-            f"Stock in freefall — SMA{sma_period} decline is accelerating, not flattening"
-        )
+        if _sma_is_freefall:
+            result.verdict_reason = (
+                f"SMA{sma_period} accelerating lower with price still falling — "
+                f"not a safe entry environment"
+            )
+        else:
+            result.verdict_reason = (
+                f"SMA{sma_period} still declining / not flattening yet — "
+                f"trend structure remains unconfirmed"
+            )
     elif rsi_now >= rsi_overbought:
         result.verdict = "REJECT"
         result.verdict_reason = (
@@ -415,7 +447,7 @@ def analyze(df: pd.DataFrame, symbol: str, vrs_cfg: dict) -> AnalysisResult:
     else:
         result.verdict = "ENTER"
         result.verdict_reason = (
-            "All entry conditions satisfied: RSI oversold and curling, "
+            "All entry conditions satisfied: RSI had a pullback-threshold touch and is now curling higher, "
             f"SMA{sma_period} flattening, volume accumulation confirmed, "
             "no distribution pressure detected"
         )

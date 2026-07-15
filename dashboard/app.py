@@ -912,6 +912,17 @@ elif page == "Analyze":
         _latest_candle = df_full.index[-1].date()
         _data_gap = _latest_candle < end_date  # True if provider didn't return up to requested date
 
+        # Distinguish "session not yet complete" (informational) from a true provider gap (warning).
+        # If end_date is today and NYSE hasn't closed yet (before 4 PM ET), this is expected.
+        _session_incomplete = False
+        if _data_gap and end_date == _dt.date.today():
+            try:
+                from zoneinfo import ZoneInfo
+                from datetime import datetime as _dtnow_local
+                _session_incomplete = _dtnow_local.now(ZoneInfo("America/New_York")).hour < 16
+            except Exception:
+                pass
+
         vrs_cfg = cfg.get("volume_rsi_swing", {})
         result  = (
             analyze_exit(df_full, symbol, vrs_cfg, cost_basis)
@@ -941,8 +952,9 @@ elif page == "Analyze":
         st.session_state.az_llm_result      = None
         st.session_state.az_llm_ctx_meta    = None
         st.session_state.az_cached_at       = None
-        st.session_state.az_latest_candle   = _latest_candle
-        st.session_state.az_data_gap        = _data_gap
+        st.session_state.az_latest_candle      = _latest_candle
+        st.session_state.az_data_gap           = _data_gap
+        st.session_state.az_session_incomplete = _session_incomplete
 
         # Auto-run AI immediately if checkbox enabled and verdict warrants it
         if auto_ai and result.verdict in ("ENTER", "WAIT") and st.session_state.az_llm_key:
@@ -951,9 +963,12 @@ elif page == "Analyze":
     # ── Helper functions for Trade Decision Summary ───────────────────
     def _compute_final_action_label(result, llm_result, analysis_type):
         if analysis_type == "exit":
-            if llm_result and not getattr(llm_result, "error", None) and llm_result.final_action:
-                return llm_result.final_action
-            return {"ENTER": "HOLD", "WAIT": "TRIM", "REJECT": "EXIT"}.get(result.verdict, result.verdict)
+            if llm_result and not getattr(llm_result, "error", None):
+                # Exit verdict is the authoritative action label (HOLD/EXIT/EXIT_PARTIAL/TIGHTEN_STOP)
+                if llm_result.verdict in ("HOLD", "EXIT", "EXIT_PARTIAL", "TIGHTEN_STOP"):
+                    return llm_result.verdict
+            # Fallback: WAIT → TIGHTEN_STOP (tighten stop, not reduce position)
+            return {"ENTER": "HOLD", "WAIT": "TIGHTEN_STOP", "REJECT": "EXIT"}.get(result.verdict, result.verdict)
         if llm_result and not getattr(llm_result, "error", None) and llm_result.final_action:
             return llm_result.final_action
         if result.verdict == "REJECT":
@@ -968,7 +983,20 @@ elif page == "Analyze":
     def _setup_quality_label(result):
         if result.verdict == "REJECT":
             fails = [c.name for c in result.conditions if not c.passed]
-            return f"Blocked — {fails[0]}" if fails else "Blocked"
+            if not fails:
+                return "Blocked"
+            def _short(name):
+                if "RSI" in name:
+                    return "RSI curl not confirmed"
+                if "SMA" in name:
+                    return name.split("—")[0].strip() + " not flattening"
+                if "Volume" in name:
+                    return "volume not confirmed"
+                if "Distribution" in name or "High-Volume" in name:
+                    return "distribution days"
+                return name.split("—")[0].strip()
+            labels = [_short(f) for f in fails]
+            return f"Blocked — {' + '.join(labels)}"
         n = sum(1 for c in result.conditions if c.passed)
         t = len(result.conditions)
         if n == t:
@@ -1003,10 +1031,6 @@ elif page == "Analyze":
                 f"Rule Engine issued REJECT but Final Action is '{final_action}'. "
                 "Review AI reasoning — a REJECT normally maps to AVOID."
             )
-        rsi_cond = next((c for c in result.conditions if "RSI" in c.name), None)
-        if rsi_cond:
-            if not rsi_cond.passed and "curl" in rsi_cond.detail.lower() and "PASS" in rsi_cond.detail:
-                warnings.append("RSI condition text says PASS but condition is marked failed — check detail text.")
         if llm_result and not getattr(llm_result, "error", None):
             if result.verdict == "ENTER" and llm_result.verdict == "REJECT":
                 warnings.append(
@@ -1033,8 +1057,9 @@ elif page == "Analyze":
         end_date        = st.session_state.az_end_date
         start_date      = st.session_state.az_start_date
         analysis_type   = st.session_state.az_analysis_type
-        _latest_candle  = st.session_state.get("az_latest_candle", df_full.index[-1].date())
-        _data_gap       = st.session_state.get("az_data_gap", False)
+        _latest_candle      = st.session_state.get("az_latest_candle", df_full.index[-1].date())
+        _data_gap           = st.session_state.get("az_data_gap", False)
+        _session_incomplete = st.session_state.get("az_session_incomplete", False)
 
         # ── Trade Decision Summary ─────────────────────────────────────
         _llm_now      = st.session_state.az_llm_result
@@ -1054,6 +1079,7 @@ elif page == "Analyze":
             "AVOID": "#f44336", "WATCH": "#1976d2", "WAIT FOR TRIGGER": "#ff9800",
             "STARTER ONLY": "#f59e0b", "VALID ENTRY": "#00c853", "ADD": "#00c853",
             "HOLD": "#1976d2", "TRIM": "#ff9800", "EXIT": "#f44336",
+            "TIGHTEN_STOP": "#9c27b0", "EXIT_PARTIAL": "#ff9800",
         }
         _fa_color = _action_colors.get(_final_action, "#888")
         _ai_colors = {
@@ -1084,15 +1110,23 @@ elif page == "Analyze":
             )
 
         _PENDING = "<span style='color:#555;font-style:italic'>— run AI analysis to populate</span>"
+        _is_exit = (analysis_type == "exit")
         if _llm_now and not _llm_now.error:
             _ai_v     = _llm_now.verdict
             _ai_color = _ai_colors.get(_ai_v, "#888")
             _ai_cell  = f"<span style='color:{_ai_color};font-weight:600'>{_ai_v}</span>"
             _al_cell  = (f"<span style='color:{_align_colors.get(_alignment, '#888')};font-weight:600'>"
                          f"{_alignment}</span>") if _alignment else _PENDING
-            _trigger  = _llm_now.entry_trigger or "—"
-            _inval    = _llm_now.invalidation_level or "—"
-            _pos_g    = _llm_now.position_guidance or "—"
+            if _is_exit:
+                _trigger  = getattr(_llm_now, "reclaim_level", "") or "—"
+                _inval    = getattr(_llm_now, "stop_level", "") or "—"
+                _pos_g    = _llm_now.position_guidance or "—"
+                _exit_trig = getattr(_llm_now, "exit_trigger", "") or "—"
+            else:
+                _trigger  = _llm_now.entry_trigger or "—"
+                _inval    = _llm_now.invalidation_level or "—"
+                _pos_g    = _llm_now.position_guidance or "—"
+                _exit_trig = None
             _key_risk = _llm_now.risks[0] if _llm_now.risks else "—"
             _next_act = _llm_now.watch_for or "—"
             _conf_str = _llm_now.confidence.title() if _llm_now.confidence else ""
@@ -1102,36 +1136,51 @@ elif page == "Analyze":
             _trigger  = "—"
             _inval    = "—"
             _pos_g    = "—"
+            _exit_trig = None
             _key_risk = "—"
             _next_act = "—"
             _conf_str = ""
 
-        _main_reason = result.verdict_reason.split('.')[0] + '.' if '.' in result.verdict_reason else result.verdict_reason
+        _main_reason = result.verdict_reason.split('. ')[0] + '.' if '. ' in result.verdict_reason else result.verdict_reason
 
         _trigger_cell  = _trigger  if _trigger  != "—" else _PENDING
         _inval_cell    = _inval    if _inval    != "—" else _PENDING
         _pos_g_cell    = _pos_g    if _pos_g    != "—" else _PENDING
+        _exit_trig_cell = (_exit_trig if _exit_trig != "—" else _PENDING) if _exit_trig is not None else None
         _key_risk_cell = _key_risk if _key_risk != "—" else _PENDING
         _next_act_cell = _next_act if _next_act != "—" else _PENDING
         _conf_badge    = f'&nbsp;<span style="color:#4b5563;font-size:0.8rem">({_conf_str} confidence)</span>' if _conf_str else ""
+        _trigger_lbl   = "RECLAIM LEVEL" if _is_exit else "ENTRY TRIGGER"
+        _inval_lbl     = "STOP LEVEL"    if _is_exit else "INVALIDATION LEVEL"
 
         # Market data currency
         _candle_str  = str(_latest_candle)
         _candle_cell = (
-            f'<span style="color:#f59e0b;font-weight:600">{_candle_str}</span>'
-            if _data_gap else
             f'<span style="color:#00c853;font-weight:600">{_candle_str}</span>'
+            if not _data_gap else
+            f'<span style="color:#f59e0b;font-weight:600">{_candle_str}</span>'
         )
-        _data_gap_html = (
-            f'<div style="background:#422006;border:1px solid #92400e;border-radius:6px;'
-            f'padding:8px 12px;margin-top:10px;font-size:0.83rem;color:#fcd34d">'
-            f'⚠ Data gap: report requested through <b>{end_date}</b> but Polygon only returned '
-            f'data through <b>{_candle_str}</b>. The <b>{_candle_str}</b> candle may not yet '
-            f'be finalized by the data provider (free-tier daily aggregates are typically '
-            f'available after the following morning). All rule-engine conditions, RSI, SMA, '
-            f'volume, and distribution-day counts reflect data through <b>{_candle_str}</b> only.'
-            f'</div>'
-        ) if _data_gap else ""
+        if _session_incomplete:
+            _data_gap_html = (
+                f'<div style="background:#1a1f2e;border:1px solid #3b4a6b;border-radius:6px;'
+                f'padding:8px 12px;margin-top:10px;font-size:0.83rem;color:#94a3b8">'
+                f'ℹ Latest completed trading session: <b>{_candle_str}</b>. '
+                f'The requested date <b>{end_date}</b> has not completed yet — '
+                f'all conditions, RSI, SMA, and volume reflect data through <b>{_candle_str}</b>.'
+                f'</div>'
+            )
+        elif _data_gap:
+            _data_gap_html = (
+                f'<div style="background:#422006;border:1px solid #92400e;border-radius:6px;'
+                f'padding:8px 12px;margin-top:10px;font-size:0.83rem;color:#fcd34d">'
+                f'⚠ Data gap: report requested through <b>{end_date}</b> but the provider '
+                f'only returned data through <b>{_candle_str}</b>. '
+                f'All conditions, RSI, SMA, volume, and distribution-day counts reflect '
+                f'data through <b>{_candle_str}</b> only.'
+                f'</div>'
+            )
+        else:
+            _data_gap_html = ""
 
         # Consistency warnings
         _cw_meta = st.session_state.get("az_llm_ctx_meta") or {}
@@ -1177,13 +1226,14 @@ elif page == "Analyze":
 
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px 24px;margin-bottom:12px">
     <div>
-      <div style="color:#6b7280;font-size:0.72rem;letter-spacing:1px;margin-bottom:3px">ENTRY TRIGGER</div>
+      <div style="color:#6b7280;font-size:0.72rem;letter-spacing:1px;margin-bottom:3px">{_trigger_lbl}</div>
       <span style="color:#e2e8f0;font-size:0.88rem">{_trigger_cell}</span>
     </div>
     <div>
-      <div style="color:#6b7280;font-size:0.72rem;letter-spacing:1px;margin-bottom:3px">INVALIDATION LEVEL</div>
+      <div style="color:#6b7280;font-size:0.72rem;letter-spacing:1px;margin-bottom:3px">{_inval_lbl}</div>
       <span style="color:#e2e8f0;font-size:0.88rem">{_inval_cell}</span>
     </div>
+    {(f'<div><div style="color:#6b7280;font-size:0.72rem;letter-spacing:1px;margin-bottom:3px">EXIT TRIGGER</div><span style="color:#e2e8f0;font-size:0.88rem">{_exit_trig_cell}</span></div>') if _exit_trig_cell is not None else ""}
     <div>
       <div style="color:#6b7280;font-size:0.72rem;letter-spacing:1px;margin-bottom:3px">POSITION GUIDANCE</div>
       <span style="color:#e2e8f0;font-size:0.88rem">{_pos_g_cell}</span>
@@ -1502,19 +1552,30 @@ elif page == "Analyze":
                             "AVOID": "#f44336", "WATCH": "#1976d2", "WAIT FOR TRIGGER": "#ff9800",
                             "STARTER ONLY": "#f59e0b", "VALID ENTRY": "#00c853", "ADD": "#00c853",
                             "HOLD": "#1976d2", "TRIM": "#ff9800", "EXIT": "#f44336",
+                            "TIGHTEN_STOP": "#9c27b0", "EXIT_PARTIAL": "#ff9800",
                         }.get(_final_action_h, "#888")
                         _alignment_h      = _compute_alignment(result.verdict, llm_result.verdict, analysis_type)
-                        _main_reason_h    = (result.verdict_reason.split('.')[0] + '.'
-                                             if '.' in result.verdict_reason else result.verdict_reason)
+                        _main_reason_h    = (result.verdict_reason.split('. ')[0] + '.'
+                                             if '. ' in result.verdict_reason else result.verdict_reason)
                         _candle_str_h     = str(_latest_candle)
-                        _data_gap_html_h  = (
-                            f'<p style="background:#fff3cd;border-left:4px solid #e65100;padding:8px 12px;'
-                            f'border-radius:0 4px 4px 0;font-size:0.88rem;margin:8px 0">'
-                            f'⚠ <b>Data gap:</b> report requested through <b>{end_date}</b> but Polygon '
-                            f'only returned data through <b>{_candle_str_h}</b>. All conditions, RSI, SMA, '
-                            f'volume, and chart reflect data through <b>{_candle_str_h}</b> only. '
-                            f'Free-tier daily aggregates are typically finalized the following morning.</p>'
-                        ) if _data_gap else ""
+                        if _session_incomplete:
+                            _data_gap_html_h = (
+                                f'<p style="background:#e8f4fd;border-left:4px solid #1976d2;padding:8px 12px;'
+                                f'border-radius:0 4px 4px 0;font-size:0.88rem;margin:8px 0">'
+                                f'ℹ <b>Latest completed trading session: {_candle_str_h}.</b> '
+                                f'The requested date <b>{end_date}</b> has not completed yet — '
+                                f'all conditions, RSI, SMA, and volume reflect data through <b>{_candle_str_h}</b>.</p>'
+                            )
+                        elif _data_gap:
+                            _data_gap_html_h = (
+                                f'<p style="background:#fff3cd;border-left:4px solid #e65100;padding:8px 12px;'
+                                f'border-radius:0 4px 4px 0;font-size:0.88rem;margin:8px 0">'
+                                f'⚠ <b>Data gap:</b> report requested through <b>{end_date}</b> but the provider '
+                                f'only returned data through <b>{_candle_str_h}</b>. All conditions, RSI, SMA, '
+                                f'volume, and chart reflect data through <b>{_candle_str_h}</b> only.</p>'
+                            )
+                        else:
+                            _data_gap_html_h = ""
 
                         return f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
@@ -1578,14 +1639,26 @@ elif page == "Analyze":
       <td style="color:#6c757d;font-size:0.75rem;letter-spacing:1px">ALIGNMENT</td>
       <td colspan="3">{_alignment_h or "—"}</td>
     </tr>
-    <tr>
+    {"" if analysis_type == "exit" else f'''<tr>
       <td style="color:#6c757d;font-size:0.75rem;letter-spacing:1px">ENTRY TRIGGER</td>
       <td colspan="3">{llm_result.entry_trigger or "—"}</td>
     </tr>
     <tr>
       <td style="color:#6c757d;font-size:0.75rem;letter-spacing:1px">INVALIDATION</td>
       <td colspan="3">{llm_result.invalidation_level or "—"}</td>
+    </tr>'''}
+    {"" if analysis_type != "exit" else f'''<tr>
+      <td style="color:#6c757d;font-size:0.75rem;letter-spacing:1px">RECLAIM LEVEL</td>
+      <td colspan="3">{getattr(llm_result, "reclaim_level", "") or "—"}</td>
     </tr>
+    <tr>
+      <td style="color:#6c757d;font-size:0.75rem;letter-spacing:1px">STOP LEVEL</td>
+      <td colspan="3">{getattr(llm_result, "stop_level", "") or "—"}</td>
+    </tr>
+    <tr>
+      <td style="color:#6c757d;font-size:0.75rem;letter-spacing:1px">EXIT TRIGGER</td>
+      <td colspan="3">{getattr(llm_result, "exit_trigger", "") or "—"}</td>
+    </tr>'''}
     <tr>
       <td style="color:#6c757d;font-size:0.75rem;letter-spacing:1px">POSITION GUIDANCE</td>
       <td colspan="3">{llm_result.position_guidance or "—"}</td>

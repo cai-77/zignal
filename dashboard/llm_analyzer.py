@@ -37,42 +37,87 @@ _TX_CODE_MEANINGS = {
 }
 
 
-def _tag_news_relevance(headline: str, summary: str = "") -> str:
+# Known company name keywords for direct-company detection
+_COMPANY_KEYS: dict[str, list[str]] = {
+    "MSFT": ["microsoft", "msft", "azure", "windows", "copilot", "github", "activision", "linkedin", " teams ", "office 365", "bing "],
+    "AAPL": ["apple", "aapl", "iphone", "ipad", " mac ", "ios ", "app store", "tim cook"],
+    "GOOGL": ["google", "googl", "alphabet", "youtube", "android", " gemini", "deepmind"],
+    "GOOG":  ["google", "goog", "alphabet", "youtube", "android", " gemini", "deepmind"],
+    "AMZN": ["amazon", "amzn", " aws ", "prime ", "alexa", "whole foods"],
+    "META": ["meta ", "facebook", "instagram", "whatsapp", "zuckerberg"],
+    "NVDA": ["nvidia", "nvda", "cuda", "h100", "blackwell", "jensen huang"],
+    "TSLA": ["tesla", "tsla", "cybertruck", "elon musk", "supercharger"],
+    "NFLX": ["netflix", "nflx"],
+    "AMGN": ["amgen", "amgn"],
+    "AMD":  ["amd ", " amd,", "advanced micro devices", "radeon", "ryzen"],
+    "INTC": ["intel", "intc"],
+}
+
+
+def _tag_news_relevance(headline: str, summary: str = "", symbol: str = "") -> str:
     """Classify a news article by relevance type using keyword matching."""
     text = (headline + " " + (summary or "")).lower()
+
+    # Build company detection set for the target symbol
+    sym_upper = (symbol or "").upper()
+    company_keys = _COMPANY_KEYS.get(sym_upper, [sym_upper.lower()] if sym_upper else [])
+    is_about_company = bool(company_keys) and any(k in text for k in company_keys)
+
+    # Earnings/fundamentals always wins when present
     if any(k in text for k in [
         "earnings", " eps ", "revenue", "guidance", "quarterly results",
         "fiscal year", "q1 ", "q2 ", "q3 ", "q4 ", "annual results", "beat", "miss",
     ]):
         return "earnings/fundamentals"
+
+    # Analyst/rating wins when present
     if any(k in text for k in [
         "analyst", "upgrade", "downgrade", "price target", " pt ", "overweight",
         "underweight", "outperform", "underperform", "buy rating", "sell rating",
         "neutral rating", "initiat",
     ]):
         return "analyst/rating"
+
+    # Legal/regulatory
     if any(k in text for k in [
         "lawsuit", " sec ", "antitrust", "regulat", "fine ", "penalty",
         "investigation", "subpoena", "doj ", " ftc ", "legal action", "settlement",
     ]):
         return "legal/regulatory"
-    if any(k in text for k in [
-        "artificial intelligence", " ai ", "machine learning", "data center",
-        "cloud computing", "semiconductor", "nvidia", "openai", "chatgpt",
-        "generative ai", "large language",
-    ]):
-        return "AI infrastructure"
-    if any(k in text for k in [
-        "federal reserve", "fed rate", "interest rate", "inflation", " gdp",
-        "recession", "sector ", "s&p 500", "nasdaq", "dow jones",
-        "market selloff", "broad market", "macro", "geopolit", "tariff",
-    ]):
-        return "sector/macro"
-    if any(k in text for k in [
-        "acqui", "merger", "deal ", "launch", "partnership", "product",
-        "ceo ", "executive", "appoint", "hire ", "layoff", "restructur",
+
+    # Company-specific: article is directly about the target company (checked before broad AI/sector)
+    if is_about_company and any(k in text for k in [
+        "acqui", "merger", "deal ", "launch", "partner", "product", "ceo ", "executive",
+        "appoint", "hire ", "layoff", "restructur", "announc", "said", "plan", "report",
+        "cloud", "data center", "ai ", "artificial intelligence",
     ]):
         return "company-specific"
+
+    # AI infrastructure: directly about cloud/datacenter/AI buildout infrastructure
+    if any(k in text for k in [
+        "data center", "datacenter", "hyperscaler", "capex", "capital expenditure",
+        "infrastructure spend", "ai buildout", "training cluster", "inference chip",
+        "gpu cluster", "llm training", "cloud infrastructure",
+    ]):
+        return "AI infrastructure"
+
+    # Sector/macro: broad market, Mag 7 group, AI spending trends, yields, macro
+    if any(k in text for k in [
+        "federal reserve", "fed rate", "interest rate", "inflation", " gdp",
+        "recession", "s&p 500", "nasdaq", "dow jones", "market selloff",
+        "broad market", "macro", "geopolit", "tariff",
+        "magnificent seven", "mag 7", "mega.cap", "big tech", "tech stocks",
+        "market rotation", "bond yield", "treasury yield",
+        "artificial intelligence", " ai ", "machine learning", "semiconductor",
+        "nvidia", "openai", "chatgpt", "generative ai", "large language",
+        "ai spending", "ai capex", "cloud computing",
+    ]):
+        return "sector/macro"
+
+    # Company-specific catch-all: company mentioned but no earlier pattern matched
+    if is_about_company:
+        return "company-specific"
+
     return "low relevance"
 
 
@@ -97,6 +142,10 @@ class LLMAnalysis:
     invalidation_level: str = ""
     position_guidance: str = ""
     final_action: str = ""
+    # exit-mode specific fields
+    reclaim_level: str = ""
+    stop_level: str = ""
+    exit_trigger: str = ""
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -194,7 +243,7 @@ def fetch_news_context(symbol: str, finnhub_key: str, days: int = 14, start_date
                 "summary":   summary,
                 "source":    a.get("source", ""),
                 "url":       a.get("url", ""),
-                "relevance": _tag_news_relevance(headline, summary),
+                "relevance": _tag_news_relevance(headline, summary, symbol),
             })
         return results
     except Exception:
@@ -297,6 +346,7 @@ def fetch_market_context(polygon_key: str, as_of_date: Optional[str] = None) -> 
 
         return {
             "spy_last": float(spy_close.iloc[-1]),
+            "spy_date": spy_df.index[-1].strftime("%Y-%m-%d"),
             "spy_1d_pct": spy_1d,
             "spy_5d_pct": spy_5d,
             "spy_20d_pct": spy_20d,
@@ -417,7 +467,10 @@ def build_prompt(
             "   TRANSACTIONS', do NOT mention any insider transaction as bullish evidence. "
             "   Use exactly: 'Reported insider transaction data exists but does not include a "
             "   verified open-market purchase — it is not used as a market signal.' "
-            "   Only code P (open-market purchase) or S (open-market sale) are signals.\n\n"
+            "   Only code P (open-market purchase) or S (open-market sale) are signals. "
+            "   When code S (open-market sale) is listed as a verified signal, describe it as: "
+            "   'verified open-market insider selling is a negative-to-neutral context flag.' "
+            "   Do NOT say 'that is distribution' or imply insider selling confirms a bearish macro thesis.\n\n"
             "4. Earnings: Always label the earnings date as ESTIMATED unless the data section "
             "   explicitly says CONFIRMED. Say 'estimated earnings date: [date]', not 'earnings on [date]'.\n\n"
             "5. News sourcing: To claim a selloff is macro/sector-driven, you must cite a specific "
@@ -442,8 +495,9 @@ def build_prompt(
     if market_ctx:
         m = market_ctx
         vixy_str = f"${m['vixy_last']:.2f} ({_fmt_pct(m.get('vixy_5d_pct'))} 5d)" if m.get("vixy_last") else "n/a"
+        _spy_date_label = m.get('spy_date', 'latest completed session')
         body = (
-            f"S&P 500 (SPY):  {_fmt_pct(m.get('spy_1d_pct'))} today  |  "
+            f"S&P 500 (SPY):  {_fmt_pct(m.get('spy_1d_pct'))} in latest session ({_spy_date_label})  |  "
             f"{_fmt_pct(m.get('spy_5d_pct'))} 5-day  |  {_fmt_pct(m.get('spy_20d_pct'))} 20-day\n"
             f"Volatility (VIXY): {vixy_str}\n"
             f"Market regime: {m['regime']}"
@@ -672,6 +726,43 @@ def _build_tool_def(analysis_type: str) -> dict:
     }
     base_required = ["verdict", "confidence", "summary", "analysis", "key_observations", "risks", "watch_for"]
 
+    if analysis_type == "exit":
+        base_properties.update({
+            "reclaim_level": {
+                "type": "string",
+                "description": (
+                    "Price or condition the stock needs to reclaim to confirm the original thesis is intact. "
+                    "e.g. 'Close above SMA50 ($201) on above-average volume.' "
+                    "If not applicable, say 'N/A.'"
+                ),
+            },
+            "stop_level": {
+                "type": "string",
+                "description": (
+                    "Specific stop-loss price or condition. "
+                    "Name the exact level and how it is derived. "
+                    "e.g. 'Stop below $195 — 2% below cost basis.'"
+                ),
+            },
+            "exit_trigger": {
+                "type": "string",
+                "description": (
+                    "Specific price or condition that would trigger a full or partial exit. "
+                    "e.g. 'Exit if price closes below $195 on above-average volume.' "
+                    "If thesis is intact, state what would change that assessment."
+                ),
+            },
+            "position_guidance": {
+                "type": "string",
+                "description": (
+                    "Specific guidance on position management — hold, raise stop, trim, or exit and at what price. "
+                    "e.g. 'Hold position, raise stop toward $199–$200. "
+                    "Trim only if price fails to reclaim SMA50 or closes below support.'"
+                ),
+            },
+        })
+        base_required += ["reclaim_level", "stop_level", "exit_trigger", "position_guidance"]
+
     if analysis_type != "exit":
         base_properties.update({
             "final_action": {
@@ -784,6 +875,9 @@ def call_llm(prompt_data: dict, api_key: str, model: str, analysis_type: str = "
                 invalidation_level=inp.get("invalidation_level", ""),
                 position_guidance=inp.get("position_guidance", ""),
                 final_action=inp.get("final_action", ""),
+                reclaim_level=inp.get("reclaim_level", ""),
+                stop_level=inp.get("stop_level", ""),
+                exit_trigger=inp.get("exit_trigger", ""),
             )
 
     return LLMAnalysis(
