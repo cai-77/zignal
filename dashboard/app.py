@@ -1152,6 +1152,19 @@ elif page == "Analyze":
         _conf_badge    = f'&nbsp;<span style="color:#4b5563;font-size:0.8rem">({_conf_str} confidence)</span>' if _conf_str else ""
         _trigger_lbl   = "RECLAIM LEVEL" if _is_exit else "ENTRY TRIGGER"
         _inval_lbl     = "STOP LEVEL"    if _is_exit else "INVALIDATION LEVEL"
+        _cell_s = 'color:#6b7280;font-size:0.72rem;letter-spacing:1px;margin-bottom:3px'
+        _val_s  = 'color:#e2e8f0;font-size:0.88rem'
+        _et_row = (f'<div><div style="{_cell_s}">EXIT TRIGGER</div>'
+                   f'<span style="{_val_s}">{_exit_trig_cell}</span></div>') if _exit_trig_cell is not None else ""
+        _second_grid_html = (
+            f'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px 24px;margin-bottom:12px">'
+            f'<div><div style="{_cell_s}">{_trigger_lbl}</div><span style="{_val_s}">{_trigger_cell}</span></div>'
+            f'<div><div style="{_cell_s}">{_inval_lbl}</div><span style="{_val_s}">{_inval_cell}</span></div>'
+            f'{_et_row}'
+            f'<div><div style="{_cell_s}">POSITION GUIDANCE</div><span style="{_val_s}">{_pos_g_cell}</span></div>'
+            f'<div><div style="{_cell_s}">KEY RISK</div><span style="{_val_s}">{_key_risk_cell}</span></div>'
+            f'</div>'
+        )
 
         # Market data currency
         _candle_str  = str(_latest_candle)
@@ -1224,25 +1237,7 @@ elif page == "Analyze":
 
   <hr style="border-color:#1f2937;margin:12px 0">
 
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px 24px;margin-bottom:12px">
-    <div>
-      <div style="color:#6b7280;font-size:0.72rem;letter-spacing:1px;margin-bottom:3px">{_trigger_lbl}</div>
-      <span style="color:#e2e8f0;font-size:0.88rem">{_trigger_cell}</span>
-    </div>
-    <div>
-      <div style="color:#6b7280;font-size:0.72rem;letter-spacing:1px;margin-bottom:3px">{_inval_lbl}</div>
-      <span style="color:#e2e8f0;font-size:0.88rem">{_inval_cell}</span>
-    </div>
-    {(f'<div><div style="color:#6b7280;font-size:0.72rem;letter-spacing:1px;margin-bottom:3px">EXIT TRIGGER</div><span style="color:#e2e8f0;font-size:0.88rem">{_exit_trig_cell}</span></div>') if _exit_trig_cell is not None else ""}
-    <div>
-      <div style="color:#6b7280;font-size:0.72rem;letter-spacing:1px;margin-bottom:3px">POSITION GUIDANCE</div>
-      <span style="color:#e2e8f0;font-size:0.88rem">{_pos_g_cell}</span>
-    </div>
-    <div>
-      <div style="color:#6b7280;font-size:0.72rem;letter-spacing:1px;margin-bottom:3px">KEY RISK</div>
-      <span style="color:#e2e8f0;font-size:0.88rem">{_key_risk_cell}</span>
-    </div>
-  </div>
+  {_second_grid_html}
 
   <div style="background:#0f172a;border-left:3px solid #7c3aed;border-radius:0 6px 6px 0;padding:10px 14px">
     <div style="color:#6b7280;font-size:0.72rem;letter-spacing:1px;margin-bottom:3px">NEXT ACTION</div>
