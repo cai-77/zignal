@@ -215,19 +215,55 @@ Single Polygon REST call. Returns a UTC-indexed DataFrame with `open, high, low,
 
 | # | Condition | Passes When |
 |---|-----------|-------------|
-| 1 | RSI oversold & curling up | RSI touched below threshold within `rsi_lookback_bars`, and today's RSI > yesterday's RSI |
+| 1 | RSI — Pullback Threshold & Curling Up | RSI touched below threshold within `rsi_lookback_bars`, AND today's RSI > yesterday's RSI (both sub-conditions required) |
 | 2 | SMA flattening (not freefall) | SMA decline is slowing (recent slope less negative than prior slope), OR price already turned up despite SMA still declining (bottoming pattern) |
 | 3 | Volume accumulation | Up-day avg volume ≥ `volume_dry_up_ratio` × down-day avg volume (buyers stepping in) |
 | 4 | No institutional dumping | ≤ `max_distribution_days` distribution days in the lookback window (high-volume down days) |
 
+**RSI condition detail format:**
+
+The RSI condition (Condition 1) reports both sub-conditions as numbered items. When the overall condition fails, the detail opens with a summary line explaining which sub-condition is the blocker:
+
+```
+Threshold touched but RSI curl not yet confirmed (both required).
+[1] Threshold touch: PASS — RSI dipped to 36.2 (4 bars ago), recovered +8.1 pts to 44.3 now [single dip]
+[2] Curling: FAIL — still falling (43.1 → 41.8)
+```
+
+**Near-miss handling:** If RSI low was within 0.5 points of the threshold but didn't reach it, the threshold touch detail reads:
+
+```
+NEAR MISS — RSI low was 40.4 vs threshold 40.0 (0.4 pts short). Does not pass the rule.
+```
+
+**SMA severity gate:**
+
+The SMA condition distinguishes between mild decline and freefall based on numeric thresholds:
+
+- **Freefall** (triggers REJECT): `recent_pct_decline < -0.05` OR `3-bar price change < -5.0%`
+  - Detail: "accelerating sharply downward" / "not a safe entry environment"
+- **Mild decline** (triggers WAIT, not REJECT): decline is happening but below severity thresholds
+  - Detail: "still declining, not yet flattening"
+
 **Verdict logic (in priority order):**
 1. REJECT if distribution days exceeded (hard stop — smart money is selling)
-2. REJECT if SMA still in freefall AND price also falling
+2. REJECT if SMA is in freefall AND price also falling (severity gate triggered)
 3. REJECT if RSI is overbought (missed the entry window)
-4. WAIT if RSI hasn't touched oversold territory yet
-5. WAIT if RSI touched oversold but still falling (hasn't curled)
+4. WAIT if RSI hasn't touched the threshold yet (including near-miss)
+5. WAIT if RSI touched threshold but hasn't curled yet
 6. WAIT if RSI and SMA are fine but volume not confirming
-7. ENTER if all four conditions pass
+7. WAIT if SMA is mildly declining but not severe enough for freefall REJECT
+8. ENTER if all four conditions pass
+
+**Setup Quality label:**
+
+`_setup_quality_label` in `app.py` collects all failing conditions and returns a multi-blocker string:
+
+```
+Blocked — RSI curl not confirmed + SMA not flattening
+```
+
+Short names are derived by condition: RSI → "RSI curl not confirmed", SMA → "{name} not flattening", Volume → "volume not confirmed", Distribution → "distribution days".
 
 ### `llm_analyzer.py` — AI Hybrid Layer
 
@@ -249,20 +285,60 @@ The tool schema enforces: `verdict` (enum), `confidence` (enum), `summary`, `ana
 
 **`LLMAnalysis` dataclass**
 ```
-.verdict           "ENTER" | "WAIT" | "REJECT" | "CAUTION"
+.verdict           entry: "ENTER"|"WAIT"|"REJECT"|"CAUTION"
+                   exit:  "HOLD"|"EXIT"|"EXIT_PARTIAL"|"TIGHTEN_STOP"
 .confidence        "high" | "medium" | "low"
 .summary           one-line headline
 .analysis          2-4 sentence holistic narrative
 .key_observations  list[str]  — what the rules missed or confirmed
 .risks             list[str]
 .watch_for         str  — next 1-3 session watchpoints
+.final_action      str  — entry mode only; empty in exit mode
+.reclaim_level     str  — exit mode: price level to reclaim for bullish re-confirmation
+.stop_level        str  — exit mode: suggested stop placement
+.exit_trigger      str  — exit mode: specific event/level forcing immediate exit
+.position_guidance str  — exit mode: full/partial/hold with tighter stop
 .model_used        str
 .skipped           bool
 .skip_reason       str
 .error             str | None
 ```
 
-Note the AI adds a fourth verdict option — **CAUTION** — which means all conditions technically pass but contextual factors (momentum, market structure, volume narrative) raise concern. This distinction is not possible in the binary rule engine.
+Note the AI adds a fourth entry verdict option — **CAUTION** — which means all conditions technically pass but contextual factors raise concern. This distinction is not possible in the binary rule engine.
+
+**Exit analysis mode:**
+
+When `analysis_type="exit"` is passed to `call_llm()`, the tool schema switches to exit-specific required fields (`reclaim_level`, `stop_level`, `exit_trigger`, `position_guidance`) and the verdict enum changes to `HOLD|EXIT|EXIT_PARTIAL|TIGHTEN_STOP`. The `final_action` field is not included in the exit tool schema and is always `""` in exit mode.
+
+`app.py` resolves the final action badge with `_compute_final_action_label`:
+- In exit mode: uses `llm_result.verdict` directly for the four exit verdicts; falls back to rule→exit mapping (`ENTER→HOLD`, `WAIT→TIGHTEN_STOP`, `REJECT→EXIT`) only if the LLM was skipped or errored
+- In entry mode: uses `llm_result.final_action` as before
+
+**News relevance tagging:**
+
+`_tag_news_relevance(headline, summary, symbol)` categorizes news items in priority order:
+
+1. **earnings** — matches earnings/EPS/guidance keywords
+2. **analyst** — analyst upgrade/downgrade/price target
+3. **legal/regulatory** — legal/regulatory action
+4. **company-specific** — checked against `_COMPANY_KEYS[symbol]` (brand names, products, subsidiaries). This runs *before* AI/sector to prevent generic AI articles from being incorrectly elevated.
+5. **AI infrastructure** — datacenter/capex spending keywords (only if not already matched as company-specific)
+6. **sector/macro** — Magnificent 7, Fed, yields, broad market
+7. **company-specific** (catch-all) — symbol string match
+8. **low relevance** — everything else
+
+The `_COMPANY_KEYS` dict covers major tech tickers (MSFT, AAPL, GOOGL, AMZN, META, NVDA, TSLA, NFLX, AMGN, AMD, INTC) with brand-specific terms (e.g. "azure", "copilot", "github" for MSFT).
+
+**Market context dates:**
+
+The prompt includes explicit session dates rather than relative words like "today":
+```
+S&P 500 (SPY): +0.8% in latest session (2026-07-14) | ...
+```
+
+**Insider selling system prompt rule:**
+
+The LLM system prompt includes a rule that when a verified open-market insider selling signal (Form 4, transaction code S) is present: describe it as "verified open-market insider selling is a negative-to-neutral context flag" and do not call it distribution.
 
 ### `volume_rsi_swing.py` — Live/Backtest Strategy
 
@@ -275,7 +351,7 @@ Key parameters mirrored between both:
 | `rsi_period` | 14 | Wilder RSI period |
 | `rsi_oversold` | 40 | Oversold threshold (stricter than classic 30) |
 | `rsi_overbought` | 65 | Exit / reject threshold |
-| `rsi_lookback_bars` | 10 | Window to look back for an oversold touch |
+| `rsi_lookback_bars` | 10 | Window to look back for a pullback threshold touch |
 | `sma_period` | 50 | SMA to track for trend |
 | `sma_slope_period` | 5 | Bars per slope window for flattening detection |
 | `volume_dry_up_ratio` | 0.80 | Min ratio of up-day to down-day avg volume |
@@ -321,6 +397,27 @@ call_llm(prompt_data, api_key, model)            ← Anthropic API
        ▼
 Display: verdict badge, analysis, observations, risks, watch_for
 ```
+
+### Data gap banner logic
+
+After fetching bars, `app.py` checks if the response covers the requested end date. If the last returned bar is behind `end_date`, a `_data_gap` flag is set. The display then distinguishes two cases:
+
+```python
+if _data_gap and end_date == date.today():
+    _session_incomplete = datetime.now(ZoneInfo("America/New_York")).hour < 16
+```
+
+- **Before 4 PM ET:** Blue info banner — "Session may still be open. Today's bar won't appear until after market close."
+- **After 4 PM ET with gap:** Amber warning banner — "Data gap detected for {date}. Bar may not be finalized yet."
+- **No gap:** No banner.
+
+This avoids the false alarm of telling users their Polygon tier is insufficient when the actual issue is an intraday check before market close.
+
+### HTML grid rendering in st.markdown
+
+The Trade Decision Summary uses `st.markdown(..., unsafe_allow_html=True)` with an f-string template. A blank line inside an HTML block in the f-string causes Python-Markdown to restart paragraph parsing and render subsequent divs as literal text.
+
+To prevent this, the second metrics grid (ENTRY TRIGGER / INVALIDATION or exit equivalents) is pre-computed as a single concatenated Python string (`_second_grid_html`) with no newlines between tags, then placed on one line in the template. Conditional rows (e.g. EXIT TRIGGER which only appears in exit mode) are computed as a separate string variable (`_et_row`) that evaluates to `""` in entry mode — never a blank line.
 
 ### Why tool use for structured output?
 
@@ -372,7 +469,7 @@ volume_rsi_swing:
   rsi_period: 14
   rsi_oversold: 40
   rsi_overbought: 65
-  rsi_lookback_bars: 10        # key knob — increase to catch earlier oversold touches
+  rsi_lookback_bars: 10        # key knob — increase to catch earlier threshold touches
   sma_period: 50
   sma_slope_period: 5
   volume_lookback: 20

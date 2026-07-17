@@ -12,13 +12,14 @@ For architecture, setup, and configuration reference, see [TECHNICAL_GUIDE.md](T
 2. [The Analyze Page — Step by Step](#2-the-analyze-page--step-by-step)
 3. [Reading the Rule-Based Verdict](#3-reading-the-rule-based-verdict)
 4. [The Four Conditions Explained](#4-the-four-conditions-explained)
-5. [Reading the AI Analysis](#5-reading-the-ai-analysis)
-6. [The Chart Panel](#6-the-chart-panel)
-7. [When to Trust the Verdict](#7-when-to-trust-the-verdict)
-8. [Tuning Parameters for Your Style](#8-tuning-parameters-for-your-style)
-9. [Common Scenarios and What to Do](#9-common-scenarios-and-what-to-do)
-10. [Cost and API Usage](#10-cost-and-api-usage)
-11. [Limitations](#11-limitations)
+5. [Exit Analysis Mode](#5-exit-analysis-mode)
+6. [Reading the AI Analysis](#6-reading-the-ai-analysis)
+7. [The Chart Panel](#7-the-chart-panel)
+8. [When to Trust the Verdict](#8-when-to-trust-the-verdict)
+9. [Tuning Parameters for Your Style](#9-tuning-parameters-for-your-style)
+10. [Common Scenarios and What to Do](#10-common-scenarios-and-what-to-do)
+11. [Cost and API Usage](#11-cost-and-api-usage)
+12. [Limitations](#12-limitations)
 
 ---
 
@@ -26,9 +27,11 @@ For architecture, setup, and configuration reference, see [TECHNICAL_GUIDE.md](T
 
 This tool is a **decision support system**, not a trading bot. It does not place orders, manage positions, or tell you how much to buy. You make every entry and exit decision.
 
-The tool exists to answer one question: **"Is this a good time to enter this stock based on the Volume-RSI Swing setup?"**
+The tool answers two questions:
+- **Entry analysis:** "Is this a good time to enter this stock based on the Volume-RSI Swing setup?"
+- **Exit analysis:** "Should I hold, trim, tighten my stop, or exit an existing position?"
 
-It does this in two layers:
+It answers both questions in two layers:
 
 **Layer 1 — Rule Engine:** A precise, deterministic check of four technical conditions derived directly from the VolumeRsiSwing strategy. Every pass/fail has a specific numeric reason. No ambiguity, no interpretation.
 
@@ -90,44 +93,72 @@ The setup is forming but not complete. Common reasons:
 ### REJECT (red)
 A hard blocker is present. One of:
 - Distribution days detected (institutional selling — smart money is exiting, not a time to buy)
-- Stock is in true freefall (SMA accelerating down AND price still falling)
+- Stock is in true freefall (SMA accelerating sharply down AND price still falling)
 - RSI is overbought — the entry window has already passed
 
 **Don't fight a REJECT.** The stock may still go up, but the specific setup this strategy looks for is not present. Find a different entry point or a different stock.
+
+### Setup Quality label
+
+When a setup is blocked (WAIT or partial fail), the badge also shows which conditions are failing. If multiple conditions block, all of them are listed:
+
+```
+Blocked — RSI curl not confirmed + SMA not flattening
+Blocked — volume not confirmed + distribution days
+```
+
+This tells you exactly what needs to change before a WAIT can become an ENTER.
 
 ---
 
 ## 4. The Four Conditions Explained
 
-### Condition 1: RSI — Oversold & Curling Up
+### Condition 1: RSI — Pullback Threshold & Curling Up
 
-**What it checks:** Did RSI touch below the oversold threshold (default: 40) within the last `rsi_lookback_bars` (default: 10) bars? And is RSI ticking higher today compared to yesterday?
+**What it checks:** Did RSI touch below the pullback threshold (default: 40) within the last `rsi_lookback_bars` (default: 10) bars? And is RSI ticking higher today compared to yesterday?
 
 **Why both parts matter:**
-- Oversold alone is not enough — a stock can stay oversold for weeks in a downtrend
+- Threshold touch alone is not enough — a stock can stay below 40 for weeks in a downtrend
 - Curling up alone is not enough — RSI at 55 ticking to 56 is not a bottoming signal
 - Together they mean: sellers exhausted themselves, and buyers are now taking control
 
 **Reading the detail:**
-```
-Oversold touch: PASS — RSI dipped to 36.2 (4 bars ago), recovered +8.1 pts to 44.3 now  
-[single dip in last 10 bars]
-Curling: PASS — curling up (43.1 → 44.3)
-```
-This is a clean signal — one dip into oversold territory 4 days ago, now recovering.
+
+When the overall condition fails, the detail opens with a summary of *which* sub-condition is the blocker:
 
 ```
-Oversold touch: PASS — RSI dipped to 33.8 (1 bars ago), recovered +2.1 pts to 35.9 now  
+Threshold touched but RSI curl not yet confirmed (both required).
+[1] Threshold touch: PASS — RSI dipped to 36.2 (4 bars ago), recovered +8.1 pts to 44.3 now  
 [single dip in last 10 bars]
-Curling: FAIL — still falling (37.2 → 35.9)
+[2] Curling: FAIL — still falling (43.1 → 41.8)
 ```
-RSI touched oversold but hasn't curled yet — wait for it to tick higher.
+RSI touched the threshold but hasn't curled yet — wait for it to tick higher.
+
+```
+RSI curling up but threshold not yet touched (both required).
+[1] Threshold touch: FAIL — RSI low was 42.1 in window (threshold 40.0, 2.1 pts above)
+[2] Curling: PASS — curling up (41.1 → 42.3)
+```
+RSI is recovering but never dipped deep enough — not a valid entry signal.
+
+When both sub-conditions pass:
+```
+[1] Threshold touch: PASS — RSI dipped to 36.2 (4 bars ago), recovered +8.1 pts to 44.3 now  
+[single dip in last 10 bars]
+[2] Curling: PASS — curling up (43.1 → 44.3)
+```
+
+**Near miss:** If the RSI low came within 0.5 points of the threshold but didn't quite reach it:
+```
+NEAR MISS — RSI low was 40.4 vs threshold 40.0 (0.4 pts short). Does not pass the rule.
+```
+This tells you the setup is close — one more down session that dips RSI slightly may complete the signal.
 
 **Episode labels:**
-- `single dip` — one clean oversold touch, classic reversal setup
-- `double-bottom` — RSI went oversold, recovered partially, then went oversold again — historically a stronger setup as it shows the level was tested twice
+- `single dip` — one clean threshold touch, classic reversal setup
+- `double-bottom` — RSI went below threshold, recovered partially, then went below again — historically a stronger setup as it shows the level was tested twice
 
-**Key tuning:** If the tool keeps missing oversold touches you can see on the chart, increase `rsi_lookback_bars` in config from 10 to 14 or 20.
+**Key tuning:** If the tool keeps missing threshold touches you can see on the chart, increase `rsi_lookback_bars` in config from 10 to 14 or 20.
 
 ---
 
@@ -148,10 +179,16 @@ SMA lags price by design — this is a normal bottoming pattern
 This is the most commonly misread condition. The SMA numbers look bad but the condition passes because price is leading the turn.
 
 ```
-FAIL — SMA50 accelerating downward (-0.06% → -0.21% per bar) 
-AND price still falling (-1.8% over last 3 bars) — true freefall
+FAIL — SMA50 still declining, not yet flattening
+(-0.06% → -0.09% per bar) AND price also falling (-1.2% over last 3 bars)
 ```
-Here both SMA and price are declining together — this is an active downtrend, not a bottom.
+Downtrend is ongoing but not accelerating sharply — WAIT, not REJECT.
+
+```
+FAIL — SMA50 accelerating sharply downward (-0.06% → -0.21% per bar) 
+AND price still falling (-6.2% over last 3 bars) — not a safe entry environment
+```
+Both SMA and price declining hard together — this produces a REJECT verdict. This is the "freefall" case: severity gate triggers when the recent SMA decline rate exceeds -5% or 3-bar price drop exceeds -5%. Mild declines are WAIT; freefall is REJECT.
 
 ---
 
@@ -200,13 +237,61 @@ Hard REJECT. The money behind this stock is exiting.
 
 ---
 
-## 5. Reading the AI Analysis
+## 5. Exit Analysis Mode
+
+In addition to entry analysis, the tool supports **exit analysis** for positions you already hold.
+
+### How to use it
+
+On the Analyze page, select **Exit Analysis** in the analysis type selector before clicking Analyze. Enter the ticker of a position you're currently holding.
+
+### Exit verdicts
+
+The rule engine still runs its four conditions, but the verdict labels and mapping change:
+
+| Entry verdict (rules) | Exit interpretation |
+|-----------------------|---------------------|
+| ENTER | HOLD — setup is intact, no reason to exit |
+| WAIT | TIGHTEN_STOP — setup is weakening, protect profits |
+| REJECT | EXIT — setup has broken down |
+
+The AI layer uses exit-specific verdicts directly:
+
+| AI Exit verdict | Meaning |
+|-----------------|---------|
+| **HOLD** | Position remains healthy — stay in |
+| **EXIT** | Setup has broken down — exit position |
+| **EXIT_PARTIAL** | Reduce exposure but don't exit fully |
+| **TIGHTEN_STOP** | Move stop up to protect gains; let price decide |
+
+### Exit-specific fields in the AI analysis
+
+In exit mode, the Trade Decision Summary shows different fields than entry mode:
+
+| Field | What it means |
+|-------|---------------|
+| **RECLAIM LEVEL** | Price the stock needs to reclaim to re-confirm bullish structure |
+| **STOP LEVEL** | Suggested stop placement based on current structure |
+| **EXIT TRIGGER** | Specific event or level that would force an immediate exit |
+| **POSITION GUIDANCE** | How to size the exit — full, partial, or hold with tighter stop |
+
+### Data gap banner
+
+When the analysis window ends on the current date and price data appears to have a gap:
+
+- **Blue banner ("Session may still be open")** — it's before 4 PM ET. The missing candle is likely today's incomplete session — not a data problem. Check back after close.
+- **Amber banner ("Data gap detected")** — it's after 4 PM ET and data is still missing. The bar may not be finalized yet on the free tier; check Polygon directly or wait until tomorrow morning.
+- **No banner** — data is complete for the selected window.
+
+---
+
+## 6. Reading the AI Analysis
 
 The AI section appears below the charts after the rule-based results. It adds a layer of judgment the rules cannot provide.
 
 ### The AI verdict
 
-The AI uses the same ENTER / WAIT / REJECT labels as the rule engine, plus one additional option:
+In **entry mode**, the AI uses the same ENTER / WAIT / REJECT labels as the rule engine, plus one additional option:
 
 | Verdict | Meaning |
 |---------|---------|
@@ -216,6 +301,8 @@ The AI uses the same ENTER / WAIT / REJECT labels as the rule engine, plus one a
 | **CAUTION** | Rules technically pass, but AI sees elevated risk — proceed carefully |
 
 **CAUTION is the most important AI-only verdict.** This is what you hire the AI for: the rule engine says "all clear" but a seasoned trader looking at the same chart might say "this works on paper but I don't like the momentum here" or "this volume pattern looks suspicious." CAUTION surfaces that.
+
+In **exit mode**, the AI uses exit-specific verdicts — see [Exit Analysis Mode](#5-exit-analysis-mode).
 
 ### Confidence
 
@@ -230,7 +317,7 @@ The AI uses the same ENTER / WAIT / REJECT labels as the rule engine, plus one a
 3-5 specific findings the rules may not have captured:
 - Divergences (e.g. price making lower lows but RSI making higher lows)
 - Support/resistance levels in the recent price history
-- Quality of the RSI oversold touch (clean spike vs gradual drift)
+- Quality of the RSI threshold touch (clean spike vs gradual drift)
 - Volume characteristics beyond the simple up/down day ratio
 
 ### Risks
@@ -244,9 +331,29 @@ What could make this trade go wrong. The AI specifically looks for:
 
 Specific price, volume, or RSI levels to monitor over the next 1-3 sessions. This gives you a concrete action trigger rather than a general "looks interesting."
 
+### News context
+
+The AI section includes relevant recent news tagged by relevance category:
+
+| Tag | What it means |
+|-----|---------------|
+| **earnings** | Earnings announcement or guidance update — highest priority |
+| **analyst** | Analyst upgrade/downgrade or price target change |
+| **legal/regulatory** | Legal or regulatory event affecting the company |
+| **company-specific** | Product news, M&A, executive change directly about this company |
+| **AI infrastructure** | Datacenter / capex spending directly tied to AI demand (tech sector) |
+| **sector/macro** | Broader market, Fed, or Magnificent 7 context |
+| **low relevance** | General market or sector noise unlikely to move this specific stock |
+
+The AI filters out low-relevance items and focuses its narrative on the headline news most likely to affect the current setup.
+
+### Insider selling context
+
+When the data includes a verified open-market insider selling signal (Form 4 filings, code S), the AI treats it as a **negative-to-neutral context flag** — it's a data point worth noting, not a definitive distribution call. The AI will not interpret a single insider sale as confirmation of institutional dumping; it weighs it alongside price action and volume.
+
 ---
 
-## 6. The Chart Panel
+## 7. The Chart Panel
 
 Three panels, all sharing the same time axis:
 
@@ -262,9 +369,9 @@ Use this panel to visually verify the SMA flattening narrative and spot the dist
 ### Panel 2: RSI
 
 - Blue line = RSI(14)
-- Green band = oversold zone (below threshold, default 40)
+- Green band = pullback threshold zone (below threshold, default 40)
 - Red band = overbought zone (above threshold, default 65)
-- Green dotted line = oversold threshold
+- Green dotted line = pullback threshold
 - Red dotted line = overbought threshold
 
 Look for the RSI touching the green zone and then curling up. Deeper touches and sharper curls are stronger signals.
@@ -279,13 +386,13 @@ Distribution days will show as tall red bars significantly above the dotted aver
 
 ---
 
-## 7. When to Trust the Verdict
+## 8. When to Trust the Verdict
 
 ### Trust it more when:
 
 - Rule verdict and AI verdict **agree** — both saying ENTER or both saying REJECT
 - AI confidence is `high`
-- RSI had a sharp, clean dip into oversold (not a slow grind)
+- RSI had a sharp, clean dip below the threshold (not a slow grind)
 - The volume accumulation ratio is clearly above threshold (not borderline at 81%)
 - No distribution days at all (not "1, which is the allowed max")
 - The AI's CAUTION or REJECT comes with specific, named observations — not vague concern
@@ -294,7 +401,7 @@ Distribution days will show as tall red bars significantly above the dotted aver
 
 - Rule engine says ENTER but AI says CAUTION — read the observations carefully before acting
 - Volume accumulation is borderline (80-85% of threshold)
-- RSI dipped oversold only briefly or months ago (high `bars_ago` value)
+- RSI dipped below threshold only briefly or many bars ago (high `bars_ago` value)
 - AI confidence is `low`
 - The SMA pass was via the "bottoming pattern" override — true, but a weaker signal than genuine flattening
 
@@ -309,13 +416,13 @@ Always check if there's an upcoming earnings announcement before entering a swin
 
 ---
 
-## 8. Tuning Parameters for Your Style
+## 9. Tuning Parameters for Your Style
 
 All parameters live in `config/config.yaml` under `volume_rsi_swing`. Changes take effect on the next Analyze click — no restart needed.
 
 ### I keep missing oversold setups I can see on the chart
 
-Increase `rsi_lookback_bars` from 10 to 14 or 20. This tells the rule engine to look further back for an oversold touch.
+Increase `rsi_lookback_bars` from 10 to 14 or 20. This tells the rule engine to look further back for a threshold touch.
 
 ### Too many false ENTER signals
 
@@ -340,22 +447,27 @@ Increase `rsi_lookback_bars` from 10 to 14 or 20. This tells the rule engine to 
 
 ---
 
-## 9. Common Scenarios and What to Do
+## 10. Common Scenarios and What to Do
 
-### "RSI says FAIL but I see the stock dipped to 35 five days ago"
+### "RSI says FAIL but I see the stock dipped below 40 five days ago"
 
-Your `rsi_lookback_bars` is too small. Go to the Settings page or edit `config.yaml` and set `rsi_lookback_bars: 14` (or higher). Re-analyze. The condition detail will then show the earlier dip.
+Your `rsi_lookback_bars` is too small. Go to the Settings page or edit `config.yaml` and set `rsi_lookback_bars: 14` (or higher). Re-analyze. The condition detail will then show the earlier threshold touch.
 
-### "SMA says FAIL — freefall — but the last 3 candles are green"
+### "SMA says FAIL but the last 3 candles are green"
 
-This can happen if the 3-bar price change is negative (e.g. the stock fell hard on day 1 of the 3-bar window, and the subsequent recovery hasn't fully offset it). Look at the exact numbers in the detail. If the bottoming pattern override isn't kicking in, it means the 3-bar price change is still negative despite recent green days. You may also want to ask the AI — this is exactly the nuance the AI layer is good at.
+Check whether the detail says "not yet flattening" (mild) vs "accelerating sharply downward / not a safe entry environment" (freefall):
+
+- **Not yet flattening:** The 3-bar price change is still negative even with recent green days — the recovery hasn't offset the prior drop. The verdict is WAIT, not REJECT. Continue monitoring.
+- **Freefall / not a safe entry environment:** SMA decline rate is severe (>-5% recent or >-5pt 3-bar price drop) and price is still falling. This is a REJECT — the tool sees active distribution, not a bottoming pattern. If you disagree, check the AI analysis for nuance.
+
+If the bottoming pattern override isn't kicking in despite green days, the 3-bar price change is likely still net negative. Look at the exact numbers in the condition detail.
 
 ### "ENTER from rules, CAUTION from AI"
 
 Read the AI's Key Observations carefully. Typical reasons:
 - The bounce is on below-average volume (the ratio passes but is borderline)
 - There's a nearby resistance level visible in the chart
-- The oversold touch was shallow and brief
+- The threshold touch was shallow and brief
 - RSI double-bottom pattern where the second low was higher than the first (losing momentum)
 
 Treat the AI's concerns as additional due diligence, not a veto. You decide.
@@ -370,7 +482,7 @@ The AI analysis section shows an info message. The rule-based analysis still wor
 
 ---
 
-## 10. Cost and API Usage
+## 11. Cost and API Usage
 
 ### Polygon.io
 
@@ -390,7 +502,7 @@ The AI analysis section shows an info message. The rule-based analysis still wor
 
 ---
 
-## 11. Limitations
+## 12. Limitations
 
 **Point-in-time analysis only.** The verdict evaluates the last bar of your selected window. It does not forecast what will happen next — it assesses whether the setup conditions are met *right now*.
 
