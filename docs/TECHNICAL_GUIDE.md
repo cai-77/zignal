@@ -501,63 +501,83 @@ backtest:
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.11+ (3.12 or 3.14 also work)
 - A Polygon.io account (free tier works for analysis and backtesting)
 - An Anthropic account for AI analysis (optional but recommended)
 - An Alpaca account for paper/live trading (optional)
 
-### Step 1 — Clone and create virtual environment
+### One-command setup (recommended)
+
+After cloning the repo, run:
 
 ```bash
-cd trading_system
-python3 -m venv .venv
-source .venv/bin/activate
+bash setup.sh
 ```
 
-### Step 2 — Install dependencies
+The script:
+1. Detects Python 3.11+ (checks Homebrew paths on macOS automatically)
+2. Creates `.venv` and installs all dependencies
+3. Prompts for API keys one at a time with clear instructions on where to get each one
+4. Writes `config/config.yaml` from the template
+5. Smoke-tests the install (all imports + config load)
+6. Prints the launch command
+
+Re-enter API keys without reinstalling:
+
+```bash
+bash setup.sh --rekey
+```
+
+### Manual setup (alternative)
+
+If you prefer to set up step by step:
+
+**Step 1 — Create virtual environment**
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate        # macOS / Linux
+# .venv\Scripts\activate         # Windows
+```
+
+**Step 2 — Install dependencies**
 
 ```bash
 pip install -r requirements.txt
 ```
 
-This installs all packages including `anthropic`, `polygon-api-client`, `streamlit`, `plotly`, `alpaca-py`, and others.
+**Step 3 — Configure API keys**
 
-### Step 3 — Configure API keys
+```bash
+cp config/config.yaml.template config/config.yaml
+```
 
 Edit `config/config.yaml` and fill in your keys:
 
 ```yaml
 polygon:
-  api_key: "your-polygon-key"
+  api_key: "your-polygon-key"     # required
 
 llm:
-  api_key: "your-anthropic-key"   # or use env var (see below)
+  api_key: "your-anthropic-key"   # optional — or use ANTHROPIC_API_KEY env var
+
+alpaca:
+  api_key: "your-alpaca-key"      # optional — only for paper/live trading
+  secret_key: "your-alpaca-secret"
 ```
 
-For Anthropic, the environment variable approach is preferred (keeps keys out of the config file):
+**Step 4 — Launch**
 
 ```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
-```
-
-### Step 4 — Launch the dashboard
-
-```bash
-python main.py --mode dashboard
-```
-
-Or directly:
-
-```bash
-.venv/bin/streamlit run dashboard/app.py
+.venv/bin/python main.py --mode dashboard
 ```
 
 Opens at `http://localhost:8501`.
 
-### Step 5 — (Optional) Run a backtest to verify setup
+**Step 5 — (Optional) Run a backtest to verify setup**
 
 ```bash
-python main.py --mode backtest --strategy volume_rsi_swing \
+.venv/bin/python main.py --mode backtest --strategy volume_rsi_swing \
   --start 2024-01-01 --end 2024-12-31
 ```
 
