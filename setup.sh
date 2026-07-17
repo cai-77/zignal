@@ -212,7 +212,8 @@ pathlib.Path("$CFG").write_text(out)
 print("  done")
 PYEOF
 
-  ok "config/config.yaml written"
+  chmod 600 "$CFG"
+  ok "config/config.yaml written (permissions: owner read/write only)"
 fi   # end of SKIP_CONFIG
 
 # ─────────────────────────────────────────────────────────────────────────────
